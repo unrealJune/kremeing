@@ -185,20 +185,37 @@
   <script type="text/babel">
     const FALLBACK_CENTER = { lat: 40.7589, lng: -73.9851 }; // Times Square
 
+    // Parse `?store=N&lat=&lng=` once at module init. When a share link
+    // includes all three, we honor the sender's view: skip geolocation,
+    // center the map there, and pre-select the shared store as soon as
+    // the nearby fetch returns it.
+    const SHARED = (() => {
+      const p = new URLSearchParams(window.location.search);
+      const id  = parseInt(p.get('store'), 10);
+      const lat = parseFloat(p.get('lat'));
+      const lng = parseFloat(p.get('lng'));
+      if (Number.isFinite(id) && Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { id, lat, lng };
+      }
+      return null;
+    })();
+
     function App() {
       const scheme = window.M3_SCHEMES.light;
-      const [center, setCenter] = React.useState(FALLBACK_CENTER);
+      const [center, setCenter] = React.useState(
+        SHARED ? { lat: SHARED.lat, lng: SHARED.lng } : FALLBACK_CENTER);
       const [userPos, setUserPos] = React.useState(null);
-      const [locating, setLocating] = React.useState(true);
+      const [locating, setLocating] = React.useState(SHARED == null);
       const [stores, setStores] = React.useState([]);
       const [error, setError] = React.useState(null);
-      const [selected, setSelected] = React.useState(null);
+      const [selected, setSelected] = React.useState(SHARED ? SHARED.id : null);
       const [listOpen, setListOpen] = React.useState(false);
 
-      // ── Geolocate; bump timeout to 10s (cold GPS lock can be slow) and
-      //    expose the in-flight state to the UI so we don't silently jump
-      //    to NYC while the phone is still locating.
+      // ── Geolocate (skipped when arriving via a share link). Bump
+      //    timeout to 10s — cold GPS lock can be slow — and expose
+      //    the in-flight state so we don't silently jump to NYC.
       React.useEffect(() => {
+        if (SHARED) return;
         if (!navigator.geolocation) {
           setLocating(false);
           return;

@@ -323,6 +323,12 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
   const [hourly, setHourly] = React.useState(null);
   const [daily, setDaily] = React.useState(null);
 
+  // ── share + notify ───────────────────────────────────────────────────
+  const [shareToast, setShareToast] = React.useState(null);   // 'copied' | 'error' | null
+  const [notifyState, setNotifyState] = React.useState('idle'); // 'idle' | 'subscribed' | 'denied' | 'unsupported'
+  const pollIntervalRef = React.useRef(null);
+  const lastSeenStatusRef = React.useRef(store.currentStatus);
+
   // ── swipe-to-dismiss + exit animation ────────────────────────────────
   const [closing, setClosing] = React.useState(false);
   const [dragY, setDragY] = React.useState(0);
@@ -364,6 +370,103 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
     fetchUptimeBuckets(store.id, 'day').then(b => { if (!cancelled) setDaily(b); });
     return () => { cancelled = true; };
   }, [store.id, fetchUptimeBuckets]);
+
+  // Stop polling when the sheet unmounts (close, navigate, sheet swap).
+  React.useEffect(() => () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // ── share ─────────────────────────────────────────────────────────────
+  // Build a shareable deep link. Includes lat/lng so the recipient's
+  // /stores/nearby fetch will return this store regardless of where
+  // they are.
+  const buildShareUrl = () =>
+    `${window.location.origin}/?store=${store.id}` +
+    `&lat=${store.latitude.toFixed(4)}&lng=${store.longitude.toFixed(4)}`;
+
+  const onShare = async () => {
+    const url = buildShareUrl();
+    const data = {
+      title: `${window.shortName(store.name)} — Hot Light`,
+      text: store.currentStatus === 'on'
+        ? `🔥 The Hot Light is ON at ${window.shortName(store.name)}!`
+        : `Track the Hot Light at ${window.shortName(store.name)}.`,
+      url,
+    };
+    try {
+      // navigator.share works on iOS Safari, Android Chrome, recent
+      // desktop Safari/Edge. We feature-detect canShare too — Firefox
+      // has the symbol but rejects most payloads on desktop.
+      if (navigator.share && (!navigator.canShare || navigator.canShare(data))) {
+        await navigator.share(data);
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        setShareToast('copied');
+        setTimeout(() => setShareToast(null), 2200);
+      } else {
+        // Last-resort fallback: prompt with the URL preselected.
+        window.prompt('Copy this link:', url);
+      }
+    } catch (err) {
+      // AbortError = user cancelled the native share — silent.
+      if (err && err.name !== 'AbortError') {
+        setShareToast('error');
+        setTimeout(() => setShareToast(null), 2200);
+      }
+    }
+  };
+
+  // ── notify when hot ──────────────────────────────────────────────────
+  // Polls every 60s while subscribed; fires a browser notification on
+  // off→on transitions. Lifetime is tied to this BottomSheet instance —
+  // closing the sheet stops the polling. Cross-session persistence
+  // would require a service worker + Web Push; deferred for now.
+  const onNotify = async () => {
+    if (notifyState === 'subscribed') {
+      setNotifyState('idle');
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      return;
+    }
+    if (typeof Notification === 'undefined') {
+      setNotifyState('unsupported');
+      return;
+    }
+    if (Notification.permission === 'denied') {
+      setNotifyState('denied');
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      const result = await Notification.requestPermission();
+      if (result !== 'granted') {
+        setNotifyState(result === 'denied' ? 'denied' : 'idle');
+        return;
+      }
+    }
+
+    setNotifyState('subscribed');
+    lastSeenStatusRef.current = store.currentStatus;
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const dto = await window.KREMEING_API.fetchHotLight(store.id);
+        if (dto.status === 'on' && lastSeenStatusRef.current !== 'on') {
+          new Notification(`🔥 ${window.shortName(store.name)}`, {
+            body: 'Hot doughnuts ready now',
+            tag: `kremeing-${store.id}`,   // collapses repeats per store
+            renotify: false,
+          });
+        }
+        lastSeenStatusRef.current = dto.status;
+      } catch (err) {
+        // transient upstream blip — keep polling
+      }
+    }, 60_000);
+  };
 
   const hot = store.currentStatus === 'on';
   const unknown = store.currentStatus === 'unknown';
@@ -503,21 +606,48 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
           <MIcon name="directions" size={18} color={scheme.onPrimary} />
           Directions
         </button>
-        <button aria-label="Notify when hot" style={{
-          width: 48, height: 48, borderRadius: 24, border: 'none',
-          background: scheme.secondaryContainer, color: scheme.onSecondaryContainer,
-          cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <MIcon name="notifications_active" size={20} color={scheme.onSecondaryContainer} />
+        <button
+          onClick={onNotify}
+          aria-label={notifyState === 'subscribed' ? 'Stop notifying' : 'Notify when hot'}
+          aria-pressed={notifyState === 'subscribed'}
+          title={
+            notifyState === 'subscribed' ? 'Notifying you when the light flips on'
+            : notifyState === 'denied'   ? 'Notifications blocked — enable in browser settings'
+            : notifyState === 'unsupported' ? 'Notifications not supported in this browser'
+            : 'Get a notification when the Hot Light turns on'
+          }
+          disabled={notifyState === 'denied' || notifyState === 'unsupported'}
+          style={{
+            width: 48, height: 48, borderRadius: 24, border: 'none',
+            background: notifyState === 'subscribed' ? scheme.primary : scheme.secondaryContainer,
+            color: notifyState === 'subscribed' ? scheme.onPrimary : scheme.onSecondaryContainer,
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: (notifyState === 'denied' || notifyState === 'unsupported') ? 0.5 : 1,
+          }}>
+          <MIcon
+            name="notifications_active"
+            size={20}
+            color={notifyState === 'subscribed' ? scheme.onPrimary : scheme.onSecondaryContainer}
+          />
         </button>
-        <button aria-label="Share" style={{
-          width: 48, height: 48, borderRadius: 24,
-          border: `1px solid ${scheme.outline}`, background: 'transparent',
-          color: scheme.onSurface, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <MIcon name="ios_share" size={20} color={scheme.onSurface} />
+        <button
+          onClick={onShare}
+          aria-label="Share"
+          title={shareToast === 'copied' ? 'Link copied!' : 'Share a link to this store'}
+          style={{
+            width: 48, height: 48, borderRadius: 24,
+            border: `1px solid ${scheme.outline}`,
+            background: shareToast === 'copied' ? scheme.secondaryContainer : 'transparent',
+            color: scheme.onSurface, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'background 200ms',
+          }}>
+          <MIcon
+            name={shareToast === 'copied' ? 'check' : 'ios_share'}
+            size={20}
+            color={shareToast === 'copied' ? scheme.onSecondaryContainer : scheme.onSurface}
+          />
         </button>
       </div>
 

@@ -39,6 +39,14 @@ async function fetchUptime(storeId, bucket /* 'hour' | 'day' */) {
   return body.buckets;
 }
 
+// HotLightStatus: { storeId, status: 'on'|'off'|'unknown', observedAt }
+async function fetchHotLight(storeId) {
+  const url = `${API_BASE}/stores/${storeId}/hot-light`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 // ── relative time formatter for `lastFlippedAt` ─────────────────────────
 function relativeTime(iso) {
   if (!iso) return null;
@@ -126,7 +134,7 @@ function mockUptime(seed, bucket) {
 }
 
 Object.assign(window, {
-  KREMEING_API: { fetchNearbyStores, fetchUptime },
+  KREMEING_API: { fetchNearbyStores, fetchUptime, fetchHotLight },
   KREMEING_USE_MOCKS: USE_MOCKS,
   MOCK_STORES,
   mockUptime,
