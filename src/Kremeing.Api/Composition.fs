@@ -53,6 +53,9 @@ module Composition =
         /// Exposed so the poller writes through the same port the handlers
         /// read from — never spin up a second observations store.
         Record: Ports.RecordObservation
+        /// Push fan-out callback for the poller. `PushNotify.noop`
+        /// when push is disabled so the poller stays push-agnostic.
+        NotifyFlipOn: PushNotify.OnHotLightFlipOn
     }
 
     let build
@@ -116,4 +119,15 @@ module Composition =
             Push = push |> Option.map toPushHandlerDeps
         }
 
-        { Handlers = handlers; Record = observations.Record }
+        let notifyFlipOn =
+            match push with
+            | None -> PushNotify.noop
+            | Some feat ->
+                PushNotify.notifyFlipOn
+                    feat.Subscriptions.FindForStore
+                    feat.Subscriptions.DeleteByEndpoint
+                    feat.Dispatch
+
+        { Handlers = handlers
+          Record = observations.Record
+          NotifyFlipOn = notifyFlipOn }

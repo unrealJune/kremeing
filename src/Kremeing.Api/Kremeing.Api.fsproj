@@ -11,6 +11,7 @@
     <Compile Include="Observations.fs" />
     <Compile Include="Postgres.fs" />
     <Compile Include="PushDispatch.fs" />
+    <Compile Include="PushNotify.fs" />
     <Compile Include="Poller.fs" />
     <Compile Include="HttpHandlers.fs" />
     <Compile Include="Composition.fs" />

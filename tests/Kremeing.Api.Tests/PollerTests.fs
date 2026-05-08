@@ -44,7 +44,7 @@ let ``each unique SearchKey triggers exactly one upstream call per tick`` () =
     ]
     let search, calls = alwaysReturnsFixture ()
     let observations = InMemoryObservations.create ()
-    let _ = Poller.runOnce registry search observations.Record now |> Async.RunSynchronously
+    let _ = Poller.runOnce registry search observations.Record PushNotify.noop now |> Async.RunSynchronously
     // 2 unique keys → 2 calls, not 3
     calls () |> should equal 2
 
@@ -58,7 +58,7 @@ let ``records one observation per registry entry whose shopId is in the response
     let search, _ = alwaysReturnsFixture ()
     let observations = InMemoryObservations.create ()
     let stats =
-        Poller.runOnce registry search observations.Record now
+        Poller.runOnce registry search observations.Record PushNotify.noop now
         |> Async.RunSynchronously
     stats.Polled |> should equal 3
     stats.Recorded |> should equal 3
@@ -74,7 +74,7 @@ let ``registry entries whose shopId is missing from upstream count as Missing`` 
     let search, _ = alwaysReturnsFixture ()
     let observations = InMemoryObservations.create ()
     let stats =
-        Poller.runOnce registry search observations.Record now
+        Poller.runOnce registry search observations.Record PushNotify.noop now
         |> Async.RunSynchronously
     stats.Recorded |> should equal 1
     stats.Missing |> should equal 1
@@ -95,7 +95,7 @@ let ``failed search keys are counted but don't abort the tick`` () =
             }
     let observations = InMemoryObservations.create ()
     let stats =
-        Poller.runOnce registry search observations.Record now
+        Poller.runOnce registry search observations.Record PushNotify.noop now
         |> Async.RunSynchronously
     stats.Failed |> should equal 1
     // Seattle still recorded despite Atlanta failure
@@ -111,7 +111,7 @@ let ``observations are recorded with the tick's single observedAt timestamp`` ()
     ]
     let search, _ = alwaysReturnsFixture ()
     let observations = InMemoryObservations.create ()
-    let _ = Poller.runOnce registry search observations.Record now |> Async.RunSynchronously
+    let _ = Poller.runOnce registry search observations.Record PushNotify.noop now |> Async.RunSynchronously
 
     let s899 =
         match observations.Status (StoreId 899) |> Async.RunSynchronously with

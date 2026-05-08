@@ -193,6 +193,7 @@ let main args =
                 registry,
                 pollerSearch,
                 deps.Record,
+                deps.NotifyFlipOn,
                 Poller.defaultConfig,
                 pLogger))
         |> ignore
