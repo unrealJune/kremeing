@@ -222,42 +222,48 @@
       const lastFetchCenterRef = React.useRef({ lat: center.lat, lng: center.lng });
       const moveDebounceRef = React.useRef(null);
 
-      // Single locate handler — used both by the auto-attempt on
-      // mount and the explicit "locate me" button. iOS Safari
-      // sometimes won't show the permission prompt unless the call
-      // happens inside a user gesture; the button satisfies that.
-      const locateMe = React.useCallback(() => {
+      // Locate handler used by both the gesture-less auto-attempt on
+      // mount and the explicit "locate me" button. iOS Safari will not
+      // show the permission prompt for gesture-less calls — and worse,
+      // a gesture-less failure used to flip the button into 'denied',
+      // disabling it before the user ever got a chance to tap. The
+      // `interactive` flag is the gating mechanism: only a real user
+      // gesture can move the button into 'locating' or 'denied'.
+      // Auto-locate successes still update userPos/center/locateState
+      // because that's strictly progress, not regression.
+      const locateMe = React.useCallback((interactive) => {
         if (!navigator.geolocation) {
-          setLocateState('denied');
+          if (interactive) setLocateState('denied');
           setLocating(false);
           return;
         }
-        setLocateState('locating');
+        if (interactive) setLocateState('locating');
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             setUserPos(c);
-            // Stamp the ref *before* setCenter so the resulting map
-            // moveend doesn't trigger its own refetch loop.
             lastFetchCenterRef.current = c;
             setCenter(c);
             setLocateState('located');
             setLocating(false);
           },
           (err) => {
-            setLocateState(err && err.code === err.PERMISSION_DENIED ? 'denied' : 'idle');
             setLocating(false);
+            if (!interactive) return;   // keep the button tappable
+            setLocateState(
+              err && err.code === err.PERMISSION_DENIED ? 'denied' : 'idle');
           },
           { timeout: 10_000, maximumAge: 60_000 }
         );
       }, []);
 
-      // ── Best-effort auto-locate on mount. May silently fail on
-      //    iOS Safari if it requires a user gesture; the visible
-      //    "Use my location" button is the always-works path.
+      // ── Best-effort auto-locate on mount. iOS Safari will silently
+      //    fail without a user gesture; passing interactive=false
+      //    here means that failure leaves locateState='idle' so the
+      //    visible "Use my location" button stays enabled.
       React.useEffect(() => {
         if (SHARED) { setLocating(false); return; }
-        locateMe();
+        locateMe(false);
       }, [locateMe]);
 
       // ── /stores/nearby fetcher. Pulled out so both the initial-load
@@ -393,7 +399,7 @@
             <LocateButton
               scheme={scheme}
               state={locateState}
-              onLocate={locateMe}
+              onLocate={() => locateMe(true)}
             />
           </div>
 
