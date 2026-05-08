@@ -111,10 +111,19 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
     map.panTo([store.latitude, store.longitude], { animate: true, duration: 0.6 });
   }, [selected, stores]);
 
-  // ── recenter when the center prop moves (e.g. geolocation resolves) ──
+  // ── recenter when the center prop moves (programmatic only:
+  //    geolocation resolves, search lands, share-link arrival).
+  //    User pans intentionally don't drive `center` from App, so this
+  //    effect never fires for them — that breaks the moveend → setCenter
+  //    → panTo flicker loop. Tolerance check is belt-and-suspenders for
+  //    the case where center was set to where the map already is.
   React.useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
+    const cur = map.getCenter();
+    const dlat = Math.abs(cur.lat - center.lat);
+    const dlng = Math.abs(cur.lng - center.lng);
+    if (dlat < 0.0005 && dlng < 0.0005) return;   // ~50 m no-op
     map.panTo([center.lat, center.lng], { animate: true, duration: 0.6 });
   }, [center.lat, center.lng]);
 

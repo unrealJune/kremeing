@@ -525,8 +525,14 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
   // ── notify when hot ──────────────────────────────────────────────────
   // Polls every 60s while subscribed; fires a browser notification on
   // off→on transitions. Lifetime is tied to this BottomSheet instance —
-  // closing the sheet stops the polling. Cross-session persistence
-  // would require a service worker + Web Push; deferred for now.
+  // closing the sheet stops the polling. Real background pings need a
+  // service worker + Web Push backend; that work is in flight.
+  //
+  // iOS Safari (non-PWA) deliberately doesn't expose `Notification` at
+  // all. iOS 16.4+ supports web push but only after the page is added
+  // to the Home Screen as a PWA. We surface that distinction in the
+  // 'ios-pwa-needed' state so users get an actionable hint instead of
+  // a silently disabled button.
   const onNotify = async () => {
     if (notifyState === 'subscribed') {
       setNotifyState('idle');
@@ -537,7 +543,11 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
       return;
     }
     if (typeof Notification === 'undefined') {
-      setNotifyState('unsupported');
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isStandalone =
+        window.matchMedia?.('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+      setNotifyState(isIOS && !isStandalone ? 'ios-pwa-needed' : 'unsupported');
       return;
     }
     if (Notification.permission === 'denied') {
@@ -714,19 +724,22 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
           aria-label={notifyState === 'subscribed' ? 'Stop notifying' : 'Notify when hot'}
           aria-pressed={notifyState === 'subscribed'}
           title={
-            notifyState === 'subscribed' ? 'Notifying you when the light flips on'
-            : notifyState === 'denied'   ? 'Notifications blocked — enable in browser settings'
-            : notifyState === 'unsupported' ? 'Notifications not supported in this browser'
+            notifyState === 'subscribed'      ? 'Notifying you when the light flips on'
+            : notifyState === 'denied'        ? 'Notifications blocked — enable in browser settings'
+            : notifyState === 'unsupported'   ? 'Notifications not supported in this browser'
+            : notifyState === 'ios-pwa-needed' ? 'On iOS, tap Share → Add to Home Screen, then reopen — Apple only allows notifications from installed Home Screen apps'
             : 'Get a notification when the Hot Light turns on'
           }
-          disabled={notifyState === 'denied' || notifyState === 'unsupported'}
+          disabled={notifyState === 'denied' || notifyState === 'unsupported' || notifyState === 'ios-pwa-needed'}
           style={{
             width: 48, height: 48, borderRadius: 24, border: 'none',
             background: notifyState === 'subscribed' ? scheme.primary : scheme.secondaryContainer,
             color: notifyState === 'subscribed' ? scheme.onPrimary : scheme.onSecondaryContainer,
             cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            opacity: (notifyState === 'denied' || notifyState === 'unsupported') ? 0.5 : 1,
+            opacity: (notifyState === 'denied'
+                  || notifyState === 'unsupported'
+                  || notifyState === 'ios-pwa-needed') ? 0.5 : 1,
           }}>
           <MIcon
             name="notifications_active"

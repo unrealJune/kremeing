@@ -260,20 +260,19 @@
         locateMe();
       }, [locateMe]);
 
-      // ── Fetch nearby stores. With ?mock=1, fall back to mocks on
-      //    failure; otherwise surface the error so users don't see fake
-      //    data dressed up as real stores.
-      React.useEffect(() => {
+      // ── /stores/nearby fetcher. Pulled out so both the initial-load
+      //    effect and the user-pan handler can call it without going
+      //    through setCenter (which would round-trip into map.panTo
+      //    and cause the animation loop).
+      const fetchNearbyAt = React.useCallback((lat, lng) => {
         let cancelled = false;
         setError(null);
-        window.KREMEING_API.fetchNearbyStores(center.lat, center.lng)
+        window.KREMEING_API.fetchNearbyStores(lat, lng)
           .then((s) => {
             if (cancelled) return;
             setStores(s);
             setError(null);
-            // Remember the center we just fetched against so map-pan
-            // refetches can compare distances accurately.
-            lastFetchCenterRef.current = { lat: center.lat, lng: center.lng };
+            lastFetchCenterRef.current = { lat, lng };
           })
           .catch((err) => {
             if (cancelled) return;
@@ -286,26 +285,32 @@
             }
           });
         return () => { cancelled = true; };
-      }, [center.lat, center.lng]);
+      }, []);
 
-      // ── Map pan/zoom: refetch nearby when the user has moved far
-      //    enough that different stores are likely to be in range.
-      //    Programmatic recenters set lastFetchCenterRef = the new
-      //    center *before* moveend fires (or set it inline when search
-      //    completes), so this branch only fires for genuine user pans.
+      // ── Initial load + programmatic recenters (geolocate, search,
+      //    share-link arrival). User pans don't change `center` so
+      //    they don't trigger this effect, which is what breaks the
+      //    pan→setCenter→panTo flicker loop.
+      React.useEffect(() => {
+        return fetchNearbyAt(center.lat, center.lng);
+      }, [center.lat, center.lng, fetchNearbyAt]);
+
+      // ── Map pan/zoom: refetch /stores/nearby for the new viewport
+      //    *without* updating `center` — that would round-trip back
+      //    through map.panTo and cause flicker. Distance threshold is
+      //    crude L1 in degrees: ≈5 km on lat, ≈4 km on lng — loose
+      //    enough that finger-jitter doesn't fire, tight enough that
+      //    panning across a metro area refreshes results.
       const onViewChange = React.useCallback((c) => {
-        // Crude L1-degree distance: 1° lat ≈ 111 km, 1° lng (US) ≈ 80 km,
-        // so 0.05° ≈ 5 km on lat and ~4 km on lng. Tight enough to keep
-        // the map alive, loose enough to suppress jittery scroll fires.
         const last = lastFetchCenterRef.current;
         const moved = Math.abs(c.lat - last.lat) > 0.05
                    || Math.abs(c.lng - last.lng) > 0.05;
         if (!moved) return;
         if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
         moveDebounceRef.current = setTimeout(() => {
-          setCenter({ lat: c.lat, lng: c.lng });
+          fetchNearbyAt(c.lat, c.lng);
         }, 350);
-      }, []);
+      }, [fetchNearbyAt]);
 
       // ── Search by ZIP or "City, ST" via /stores/search.
       const onSearch = React.useCallback(async (q) => {
