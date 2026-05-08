@@ -21,6 +21,41 @@ module HttpHandlers =
         setStatusCode 400
         >=> json { error = code; message = message }
 
+    /// Hard ceiling on `until - since`. Anything wider gets rejected
+    /// before it touches the database — protects the connection pool
+    /// from `since=1900-01-01` style abuse.
+    let MaxRangeDays = 90.0
+
+    let private validateRange (since: DateTimeOffset) (until: DateTimeOffset)
+        : Result<unit, HttpHandler> =
+        if until <= since then
+            Error (writeBadRequest "invalid_range" "until must be after since")
+        elif (until - since).TotalDays > MaxRangeDays then
+            Error (writeBadRequest ErrorCodes.RangeTooWide
+                    (sprintf "Range cannot exceed %.0f days" MaxRangeDays))
+        else
+            Ok ()
+
+    /// Per-IP token-bucket gate. Short-circuits with 429 + Retry-After
+    /// when the bucket for `RemoteIpAddress` is empty. `Forwarded-For`
+    /// resolution is the host's job (UseForwardedHeaders); this looks
+    /// at whatever .NET reports as the connection peer.
+    let rateLimit (limiter: RateLimit.Limiter) (now: unit -> DateTimeOffset)
+        : HttpHandler =
+        fun next ctx ->
+            let key =
+                match ctx.Connection.RemoteIpAddress with
+                | null -> "unknown"
+                | ip -> ip.ToString()
+            if limiter.TryAcquire(key, now()) then
+                next ctx
+            else
+                (setStatusCode 429
+                 >=> setHttpHeader "Retry-After" "60"
+                 >=> json
+                     { error = ErrorCodes.RateLimited
+                       message = "Too many requests; slow down." }) earlyReturn ctx
+
     // ──── /health ───────────────────────────────────────────────────────
 
     let getHealth : HttpHandler =
@@ -72,14 +107,22 @@ module HttpHandlers =
 
     // ──── /stores/{id}/hot-light ────────────────────────────────────────
 
-    let getHotLight (getStatus: Ports.GetHotLightStatus) (rawId: string)
-                    : HttpHandler =
+    let getHotLight
+            (getStatus: Ports.GetHotLightStatus)
+            (cache: Cache.Cache<int, HotLightObservation>)
+            (now: unit -> DateTimeOffset)
+            (rawId: string)
+            : HttpHandler =
         fun next ctx ->
             task {
                 match Validation.parseStoreId rawId with
                 | Error err -> return! writeError err next ctx
                 | Ok storeId ->
-                    let! result = getStatus storeId
+                    let (StoreId sid) = storeId
+                    // Read-through cache: at most one upstream call
+                    // per shopId per TTL window across all clients.
+                    let! result =
+                        cache.GetOrAdd sid (now()) (fun _ -> getStatus storeId)
                     match result with
                     | Ok obs ->
                         return! json (Mapping.observationToDto obs) next ctx
@@ -132,9 +175,25 @@ module HttpHandlers =
                             System.Globalization.CultureInfo.InvariantCulture)
         if ok then Some v else None
 
+    /// Cap `limit` at a defensive ceiling. Upstream caps at 12 anyway,
+    /// so anything above that is functionally a no-op — but rejecting
+    /// out-of-range explicitly avoids surprising log entries.
+    [<Literal>]
+    let MaxNearbyLimit = 50
+
+    /// Quantize coordinates to ~1 km resolution so geographically
+    /// close clients hit the same cache key. (1° lat ≈ 111 km, so two
+    /// decimal places ≈ 1.1 km — about a city block.)
+    let private quantize (lat: float) (lng: float) (limit: int) : int * int * int =
+        int (System.Math.Round(lat * 100.0)),
+        int (System.Math.Round(lng * 100.0)),
+        limit
+
     let getNearby
             (search: SearchNearby)
             (storeStatus: Ports.GetStoreStatus)
+            (cache: Cache.Cache<int * int * int, NearbyResponseDto>)
+            (now: unit -> DateTimeOffset)
             : HttpHandler =
         fun next ctx ->
             task {
@@ -147,6 +206,11 @@ module HttpHandlers =
                         | true, n when n > 0 -> Some n
                         | _ -> None)
                     |> Option.defaultValue 12
+                    |> min MaxNearbyLimit
+
+                let validCoord (v: float) (lo: float) (hi: float) =
+                    not (System.Double.IsNaN v || System.Double.IsInfinity v)
+                    && v >= lo && v <= hi
 
                 match lat, lng with
                 | None, _ ->
@@ -157,21 +221,39 @@ module HttpHandlers =
                     return! writeBadRequest "missing_query_param"
                                 "lng is required and must be a number"
                                 next ctx
+                | Some la, _ when not (validCoord la -90.0 90.0) ->
+                    return! writeBadRequest "invalid_coordinate"
+                                "lat must be a finite number in [-90, 90]"
+                                next ctx
+                | _, Some ln when not (validCoord ln -180.0 180.0) ->
+                    return! writeBadRequest "invalid_coordinate"
+                                "lng must be a finite number in [-180, 180]"
+                                next ctx
                 | Some la, Some ln ->
-                    let! result = search (la, ln)
-                    match result with
-                    | Error err -> return! writeError err next ctx
-                    | Ok shops ->
-                        let trimmed = shops |> List.truncate limit
-                        let! dtos =
-                            trimmed
-                            |> List.map (nearbyStoreToDto storeStatus)
-                            |> System.Threading.Tasks.Task.WhenAll
-                        let response = {
-                            query = { latitude = la; longitude = ln; limit = limit }
-                            stores = dtos
+                    let key = quantize la ln limit
+                    let n = now()
+                    let buildResponse () =
+                        task {
+                            let! result = search (la, ln)
+                            match result with
+                            | Error err -> return Error err
+                            | Ok shops ->
+                                let trimmed = shops |> List.truncate limit
+                                let! dtos =
+                                    trimmed
+                                    |> List.map (nearbyStoreToDto storeStatus)
+                                    |> System.Threading.Tasks.Task.WhenAll
+                                return Ok {
+                                    query = { latitude = la; longitude = ln; limit = limit }
+                                    stores = dtos
+                                }
                         }
-                        return! json response next ctx
+                    let! result =
+                        cache.GetOrAdd key n (fun _ ->
+                            buildResponse () |> Async.AwaitTask)
+                    match result with
+                    | Ok r -> return! json r next ctx
+                    | Error err -> return! writeError err next ctx
             }
 
     // ──── /stores/{id}/history ──────────────────────────────────────────
@@ -207,6 +289,9 @@ module HttpHandlers =
                         ctx.TryGetQueryStringValue "since"
                         |> Option.bind parseDateTimeOffset
                         |> Option.defaultValue (until - TimeSpan.FromDays 7.0)
+                    match validateRange since until with
+                    | Error h -> return! h next ctx
+                    | Ok () ->
                     let! result = history (storeId, since, until)
                     match result with
                     | Error err -> return! writeError err next ctx
@@ -271,6 +356,10 @@ module HttpHandlers =
                             |> Option.bind parseDateTimeOffset
                             |> Option.defaultValue (until - defaultLookback)
 
+                        match validateRange since until with
+                        | Error h -> return! h next ctx
+                        | Ok () ->
+
                         // Status before history: if the store is unknown to
                         // us, return 404 so clients can distinguish "no data
                         // yet" from "store doesn't exist".
@@ -307,15 +396,29 @@ module HttpHandlers =
         History: Ports.GetHistory
         Status: Ports.GetStoreStatus
         Now: unit -> DateTimeOffset
+        /// Caches and rate-limit shield the upstream (api.krispykreme.com)
+        /// from being hammered by API consumers. Tests use permissive
+        /// instances; production wires real ones in Composition.
+        HotLightCache: Cache.Cache<int, HotLightObservation>
+        NearbyCache: Cache.Cache<int * int * int, NearbyResponseDto>
+        ProxyRateLimit: RateLimit.Limiter
     }
 
     let webApp (deps: Deps) : HttpHandler =
+        // Apply the per-IP rate limiter only to the proxy endpoints
+        // (/nearby + /hot-light) — they're the ones that go upstream.
+        // Read-only endpoints over our own DB don't need it.
+        let limited = rateLimit deps.ProxyRateLimit deps.Now
         choose [
             GET >=> route "/health" >=> getHealth
             GET >=> route "/openapi.yaml" >=> getOpenApi
             GET >=> route "/docs" >=> getDocs
-            GET >=> route "/stores/nearby" >=> getNearby deps.SearchNearby deps.Status
-            GET >=> routef "/stores/%s/hot-light" (getHotLight deps.GetHotLightStatus)
+            GET >=> route "/stores/nearby"
+                >=> limited
+                >=> getNearby deps.SearchNearby deps.Status deps.NearbyCache deps.Now
+            GET >=> routef "/stores/%s/hot-light"
+                        (fun id ->
+                            limited >=> getHotLight deps.GetHotLightStatus deps.HotLightCache deps.Now id)
             GET >=> routef "/stores/%s/history"
                         (getHistory deps.History deps.Now)
             GET >=> routef "/stores/%s/uptime"

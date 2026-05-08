@@ -10,6 +10,8 @@
     <Compile Include="Validation.fs" />
     <Compile Include="Mapping.fs" />
     <Compile Include="Uptime.fs" />
+    <Compile Include="Cache.fs" />
+    <Compile Include="RateLimit.fs" />
   </ItemGroup>
 
   <ItemGroup>

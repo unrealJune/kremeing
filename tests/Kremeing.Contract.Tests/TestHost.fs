@@ -52,11 +52,26 @@ module Stubs =
 
     let private epoch = DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
 
-    /// All-stubbed Deps. Tests override only the fields they exercise.
-    let deps : HttpHandlers.Deps = {
-        GetHotLightStatus = alwaysFails (UpstreamUnavailable "stub: not configured")
-        SearchNearby = notUsedNearby
-        History = notUsedHistory
-        Status = notUsedStatus
-        Now = fun () -> epoch
-    }
+    /// All-stubbed Deps. Each access returns a *fresh* record (with
+    /// fresh caches and a fresh limiter), because module-level singletons
+    /// would leak state between tests — a successful call in test A
+    /// would warm the cache and serve that response back in test B.
+    /// The rate-limit capacity is intentionally astronomical so existing
+    /// tests don't hit it; the dedicated rate-limit contract test
+    /// instantiates a *small* limiter for its own assertion.
+    let deps () : HttpHandlers.Deps =
+        {
+            GetHotLightStatus = alwaysFails (UpstreamUnavailable "stub: not configured")
+            SearchNearby = notUsedNearby
+            History = notUsedHistory
+            Status = notUsedStatus
+            Now = fun () -> epoch
+            HotLightCache =
+                Cache.Cache<int, Kremeing.Contracts.Domain.HotLightObservation>(
+                    System.TimeSpan.FromMinutes 5.0, 64)
+            NearbyCache =
+                Cache.Cache<int * int * int, Kremeing.Contracts.Api.NearbyResponseDto>(
+                    System.TimeSpan.FromMinutes 5.0, 64)
+            ProxyRateLimit =
+                RateLimit.Limiter(capacity = 1_000_000.0, refillPerSecond = 1_000_000.0)
+        }

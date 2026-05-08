@@ -33,7 +33,7 @@ let private sodoShop : LiveApi.KrispyShopDto = {
 
 [<Fact>]
 let ``GET /stores/nearby missing lat returns 400 with helpful error code`` () =
-    use client = TestHost.start TestHost.Stubs.deps
+    use client = TestHost.start (TestHost.Stubs.deps())
     let response = client.GetAsync("/stores/nearby?lng=-122.3").Result
     response.StatusCode |> should equal HttpStatusCode.BadRequest
     let dto = parse<ErrorDto> response
@@ -42,7 +42,7 @@ let ``GET /stores/nearby missing lat returns 400 with helpful error code`` () =
 
 [<Fact>]
 let ``GET /stores/nearby missing lng returns 400`` () =
-    use client = TestHost.start TestHost.Stubs.deps
+    use client = TestHost.start (TestHost.Stubs.deps())
     let response = client.GetAsync("/stores/nearby?lat=47.6").Result
     response.StatusCode |> should equal HttpStatusCode.BadRequest
 
@@ -59,7 +59,7 @@ let ``GET /stores/nearby returns enriched DTO with cached temporal fields`` () =
         fun _ -> async { return Ok [ sodoShop ] }
 
     let deps = {
-        TestHost.Stubs.deps with
+        (TestHost.Stubs.deps()) with
             SearchNearby = search
             Status = observations.Status
     }
@@ -82,7 +82,7 @@ let ``GET /stores/nearby returns enriched DTO with cached temporal fields`` () =
 let ``GET /stores/nearby returns null temporal fields when store has no history`` () =
     let search : HttpHandlers.SearchNearby =
         fun _ -> async { return Ok [ sodoShop ] }
-    let deps = { TestHost.Stubs.deps with SearchNearby = search }
+    let deps = { (TestHost.Stubs.deps()) with SearchNearby = search }
     use client = TestHost.start deps
 
     let response = client.GetAsync("/stores/nearby?lat=47.6&lng=-122.3").Result
@@ -100,7 +100,7 @@ let ``GET /stores/nearby?limit=N truncates response`` () =
     ]
     let search : HttpHandlers.SearchNearby =
         fun _ -> async { return Ok shops }
-    let deps = { TestHost.Stubs.deps with SearchNearby = search }
+    let deps = { (TestHost.Stubs.deps()) with SearchNearby = search }
     use client = TestHost.start deps
 
     let response = client.GetAsync("/stores/nearby?lat=47.6&lng=-122.3&limit=5").Result
@@ -111,7 +111,7 @@ let ``GET /stores/nearby?limit=N truncates response`` () =
 let ``GET /stores/nearby returns 502 when upstream fails`` () =
     let search : HttpHandlers.SearchNearby =
         fun _ -> async { return Error (UpstreamUnavailable "krispykreme.com timed out") }
-    let deps = { TestHost.Stubs.deps with SearchNearby = search }
+    let deps = { (TestHost.Stubs.deps()) with SearchNearby = search }
     use client = TestHost.start deps
 
     let response = client.GetAsync("/stores/nearby?lat=47.6&lng=-122.3").Result

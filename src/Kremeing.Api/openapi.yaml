@@ -54,20 +54,24 @@ paths:
         Proxies Krispy Kreme's `/shops` endpoint and enriches each entry
         with our cached temporal context (`lastFlippedAt`, `firstObservedAt`).
         Upstream caps the result at 12 — `limit` only narrows further.
+
+        Responses are cached for ~30s, keyed on coordinates quantized to
+        ~1 km resolution. Rate-limited at 60 req/min per client IP
+        (token bucket, shared with `/hot-light`).
       parameters:
         - in: query
           name: lat
           required: true
-          schema: { type: number, format: double }
+          schema: { type: number, format: double, minimum: -90, maximum: 90 }
           example: 47.6062
         - in: query
           name: lng
           required: true
-          schema: { type: number, format: double }
+          schema: { type: number, format: double, minimum: -180, maximum: 180 }
           example: -122.3321
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 12, default: 12 }
+          schema: { type: integer, minimum: 1, maximum: 50, default: 12 }
       responses:
         '200':
           description: Nearby stores with current hot-light status.
@@ -77,6 +81,8 @@ paths:
                 $ref: '#/components/schemas/NearbyResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '502':
           $ref: '#/components/responses/UpstreamUnavailable'
 
@@ -85,8 +91,13 @@ paths:
       tags: [live]
       summary: Current hot-light status for one store
       description: |
-        Live read; goes upstream every call. Use this for "is the light
-        on right now" UIs. For graphs and trends, use `/uptime` instead.
+        Live read backed by a 60-second in-process cache, so a hot link
+        getting passed around won't translate into hundreds of requests
+        per second against `api.krispykreme.com`. Use this for "is the
+        light on right now" UIs; for graphs and trends, use `/uptime`.
+
+        Rate-limited at 60 req/min per client IP (token bucket, shared
+        with `/nearby`).
       parameters:
         - $ref: '#/components/parameters/StoreId'
       responses:
@@ -100,6 +111,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/StoreNotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '502':
           $ref: '#/components/responses/UpstreamUnavailable'
 
@@ -123,6 +136,9 @@ paths:
         - in: query
           name: until
           schema: { type: string, format: date-time }
+          description: |
+            Exclusive upper bound. The total span (`until - since`)
+            must be ≤ 90 days; wider ranges return `range_too_wide`.
           description: Exclusive upper bound (ISO-8601 with offset).
       responses:
         '200':
@@ -160,6 +176,9 @@ paths:
         - in: query
           name: until
           schema: { type: string, format: date-time }
+          description: |
+            Exclusive upper bound. The total span (`until - since`)
+            must be ≤ 90 days; wider ranges return `range_too_wide`.
       responses:
         '200':
           description: Uptime buckets.
@@ -186,13 +205,29 @@ components:
 
   responses:
     BadRequest:
-      description: Malformed request — query param missing/wrong type, or invalid path id.
+      description: |
+        Malformed request — query param missing/wrong type, invalid path
+        id, out-of-range coordinates, or `until - since > 90 days`.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     StoreNotFound:
       description: No store exists with that `shopId` (live), or we've never observed it (history).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: |
+        Too many requests from this client IP. The proxy endpoints
+        (`/stores/nearby`, `/stores/{id}/hot-light`) share a token bucket
+        of 60 req/min per IP. Honor the `Retry-After` header (seconds).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
       content:
         application/json:
           schema:
@@ -326,6 +361,10 @@ components:
             - invalid_store_id
             - missing_query_param
             - invalid_bucket
+            - invalid_coordinate
+            - invalid_range
+            - range_too_wide
+            - rate_limited
             - not_found
           description: Stable machine-readable error code.
         message:

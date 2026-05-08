@@ -2,6 +2,7 @@ namespace Kremeing.Api
 
 open System
 open Kremeing.Contracts.Domain
+open Kremeing.Contracts.Api
 open Kremeing.Core
 
 /// Composition root. The only place where ports meet adapters; tests
@@ -63,12 +64,30 @@ module Composition =
         let searchNearby : HttpHandlers.SearchNearby =
             fun (lat, lng) -> LiveApi.searchByLocation send lat lng
 
+        // Read-through caches: TTLs short enough that data feels live,
+        // long enough that a viral link can't translate into 100 req/sec
+        // against api.krispykreme.com. Capacity is generous — keys are
+        // either shopId (ints) or quantized lat/lng tuples.
+        let hotLightCache =
+            Cache.Cache<int, HotLightObservation>(TimeSpan.FromSeconds 60.0, 1024)
+        let nearbyCache =
+            Cache.Cache<int * int * int, NearbyResponseDto>(TimeSpan.FromSeconds 30.0, 1024)
+
+        // 60 req/min per IP across the proxy endpoints. Token bucket
+        // means short bursts up to capacity are tolerated, sustained
+        // load is throttled.
+        let proxyRateLimit =
+            RateLimit.Limiter(capacity = 60.0, refillPerSecond = 1.0)
+
         let handlers : HttpHandlers.Deps = {
             GetHotLightStatus = getHotLight
             SearchNearby = searchNearby
             History = observations.History
             Status = observations.Status
             Now = now
+            HotLightCache = hotLightCache
+            NearbyCache = nearbyCache
+            ProxyRateLimit = proxyRateLimit
         }
 
         { Handlers = handlers; Record = observations.Record }

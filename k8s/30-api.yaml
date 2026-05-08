@@ -28,6 +28,13 @@ spec:
         app.kubernetes.io/name: kremeing
         app.kubernetes.io/component: api
     spec:
+      # Pod-level: refuse to schedule if anything tries to escalate
+      # to root, set the default seccomp profile (denies kernel calls
+      # most workloads don't need).
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: kremeing:latest
@@ -45,6 +52,20 @@ spec:
                   key: url
             - name: ASPNETCORE_URLS
               value: http://0.0.0.0:8080
+          # Container-level: drop every Linux capability, deny privilege
+          # escalation, mount the rootfs read-only. ASP.NET Core needs a
+          # writable /tmp and writable DataProtection-Keys dir — both
+          # provided as ephemeral emptyDir volumes below.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: aspnet-keys
+              mountPath: /home/app/.aspnet/DataProtection-Keys
           readinessProbe:
             httpGet:
               path: /health
@@ -70,6 +91,11 @@ spec:
             limits:
               cpu: 1
               memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: aspnet-keys
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

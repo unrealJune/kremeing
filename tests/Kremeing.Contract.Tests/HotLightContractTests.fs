@@ -25,11 +25,11 @@ let private parse<'T> (response: HttpResponseMessage) : 'T =
     JsonSerializer.Deserialize<'T>(body, jsonOptions)
 
 let private withStatus (status: Ports.GetHotLightStatus) =
-    { TestHost.Stubs.deps with GetHotLightStatus = status }
+    { (TestHost.Stubs.deps()) with GetHotLightStatus = status }
 
 [<Fact>]
 let ``GET /health returns 200 ok`` () =
-    use client = TestHost.start TestHost.Stubs.deps
+    use client = TestHost.start (TestHost.Stubs.deps())
     let response = client.GetAsync("/health").Result
     response.StatusCode |> should equal HttpStatusCode.OK
 

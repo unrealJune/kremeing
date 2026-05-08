@@ -10,7 +10,7 @@ open FsUnit.Xunit
 // localhost and absent everywhere else — these tests pin both sides.
 
 let private getWithOrigin (origin: string) (path: string) =
-    use client = TestHost.start TestHost.Stubs.deps
+    use client = TestHost.start (TestHost.Stubs.deps())
     let req = new HttpRequestMessage(HttpMethod.Get, path)
     req.Headers.Add("Origin", origin)
     client.SendAsync(req).Result

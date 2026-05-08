@@ -109,6 +109,10 @@ module Api =
         let UpstreamUnavailable = "upstream_unavailable"
         [<Literal>]
         let InvalidStoreId = "invalid_store_id"
+        [<Literal>]
+        let RateLimited = "rate_limited"
+        [<Literal>]
+        let RangeTooWide = "range_too_wide"
 
     module StatusValues =
         [<Literal>]

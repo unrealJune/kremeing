@@ -33,6 +33,12 @@ spec:
         app.kubernetes.io/name: kremeing
         app.kubernetes.io/component: poller
     spec:
+      # Same hardening as the api deployment — see 30-api.yaml for the
+      # reasoning behind each setting.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: poller
           image: kremeing:latest
@@ -50,6 +56,16 @@ spec:
                   key: url
             - name: ASPNETCORE_URLS
               value: http://0.0.0.0:8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: aspnet-keys
+              mountPath: /home/app/.aspnet/DataProtection-Keys
           readinessProbe:
             httpGet:
               path: /health
@@ -70,3 +86,8 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: aspnet-keys
+          emptyDir: {}

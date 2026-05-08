@@ -13,6 +13,7 @@
     <Compile Include="HistoryContractTests.fs" />
     <Compile Include="DocsContractTests.fs" />
     <Compile Include="CorsContractTests.fs" />
+    <Compile Include="SecurityContractTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

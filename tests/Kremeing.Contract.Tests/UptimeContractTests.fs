@@ -19,7 +19,7 @@ let private parse<'T> (response: HttpResponseMessage) : 'T =
 let private depsWithObservations
         (observations: InMemoryObservations.Store)
         (now: DateTimeOffset) : HttpHandlers.Deps =
-    { TestHost.Stubs.deps with
+    { (TestHost.Stubs.deps()) with
         History = observations.History
         Status = observations.Status
         Now = fun () -> now }
@@ -28,7 +28,7 @@ let private at h m = DateTimeOffset(2026, 5, 8, h, m, 0, TimeSpan.Zero)
 
 [<Fact>]
 let ``GET /stores/{id}/uptime returns 400 for non-numeric ids`` () =
-    use client = TestHost.start TestHost.Stubs.deps
+    use client = TestHost.start (TestHost.Stubs.deps())
     let response = client.GetAsync("/stores/ghost/uptime").Result
     response.StatusCode |> should equal HttpStatusCode.BadRequest
 

@@ -9,6 +9,8 @@
     <Compile Include="ValidationTests.fs" />
     <Compile Include="MappingTests.fs" />
     <Compile Include="UptimeTests.fs" />
+    <Compile Include="CacheTests.fs" />
+    <Compile Include="RateLimitTests.fs" />
   </ItemGroup>
 
   <ItemGroup>
