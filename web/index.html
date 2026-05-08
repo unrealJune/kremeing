@@ -177,6 +177,17 @@
   <div id="root"></div>
 
   <script src="stores.js"></script>
+  <!-- Service worker: registered as soon as the page loads so push
+       payloads route to /sw.js even before React mounts. Failures are
+       non-fatal (older browsers, file:// origins, etc.). -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .catch(err => console.warn('[kremeing] SW registration failed:', err));
+      });
+    }
+  </script>
   <script type="text/babel" src="m3-tokens.jsx"></script>
   <script type="text/babel" src="pins.jsx"></script>
   <script type="text/babel" src="map.jsx"></script>

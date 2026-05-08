@@ -523,25 +523,58 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
   };
 
   // ── notify when hot ──────────────────────────────────────────────────
-  // Polls every 60s while subscribed; fires a browser notification on
-  // off→on transitions. Lifetime is tied to this BottomSheet instance —
-  // closing the sheet stops the polling. Real background pings need a
-  // service worker + Web Push backend; that work is in flight.
+  // Two paths:
+  //   1. Real Web Push (preferred): registers a server-side
+  //      subscription so notifications arrive even when the tab is
+  //      closed. Requires service worker + Notification + PushManager
+  //      + the server having KREMEING_VAPID_*+Postgres.
+  //   2. In-page polling fallback: only fires while the BottomSheet is
+  //      mounted, but works on browsers/configs where push isn't
+  //      available (e.g., server returned 503 push_disabled).
   //
-  // iOS Safari (non-PWA) deliberately doesn't expose `Notification` at
-  // all. iOS 16.4+ supports web push but only after the page is added
-  // to the Home Screen as a PWA. We surface that distinction in the
-  // 'ios-pwa-needed' state so users get an actionable hint instead of
-  // a silently disabled button.
+  // iOS Safari (non-PWA) deliberately doesn't expose `Notification`.
+  // iOS 16.4+ supports web push but only after the page is added to
+  // the Home Screen as a PWA — surfaced as 'ios-pwa-needed' so users
+  // see an actionable hint.
+  const startPollingFallback = () => {
+    setNotifyState('subscribed-polling');
+    lastSeenStatusRef.current = store.currentStatus;
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const dto = await window.KREMEING_API.fetchHotLight(store.id);
+        if (dto.status === 'on' && lastSeenStatusRef.current !== 'on') {
+          new Notification(`🔥 ${window.shortName(store.name)}`, {
+            body: 'Hot doughnuts ready now',
+            tag: `kremeing-${store.id}`,
+            renotify: false,
+          });
+        }
+        lastSeenStatusRef.current = dto.status;
+      } catch (_err) { /* transient upstream blip — keep polling */ }
+    }, 60_000);
+  };
+
+  const stopPollingFallback = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
   const onNotify = async () => {
-    if (notifyState === 'subscribed') {
+    // Toggle off
+    if (notifyState === 'subscribed' || notifyState === 'subscribed-polling') {
+      stopPollingFallback();
+      try {
+        if (notifyState === 'subscribed') {
+          await window.KREMEING_API.unsubscribeStore(store.id);
+        }
+      } catch (_e) { /* leave UI optimistic; server may have purged it already */ }
       setNotifyState('idle');
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
       return;
     }
+
+    // Browser-level capability gating
     if (typeof Notification === 'undefined') {
       const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
       const isStandalone =
@@ -562,23 +595,23 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
       }
     }
 
-    setNotifyState('subscribed');
-    lastSeenStatusRef.current = store.currentStatus;
-    pollIntervalRef.current = setInterval(async () => {
+    // Try the real Web Push path; on push_disabled / unsupported, fall
+    // back to in-page polling.
+    if (window.KREMEING_API.pushSupported()) {
       try {
-        const dto = await window.KREMEING_API.fetchHotLight(store.id);
-        if (dto.status === 'on' && lastSeenStatusRef.current !== 'on') {
-          new Notification(`🔥 ${window.shortName(store.name)}`, {
-            body: 'Hot doughnuts ready now',
-            tag: `kremeing-${store.id}`,   // collapses repeats per store
-            renotify: false,
-          });
-        }
-        lastSeenStatusRef.current = dto.status;
+        await window.KREMEING_API.subscribeStore(store.id);
+        setNotifyState('subscribed');
+        return;
       } catch (err) {
-        // transient upstream blip — keep polling
+        const msg = err && err.message;
+        if (msg !== window.KREMEING_API.PUSH_DISABLED
+          && msg !== window.KREMEING_API.PUSH_UNSUPPORTED) {
+          console.warn('[kremeing] subscribe failed, falling back to polling:', msg);
+        }
+        // fall through to polling
       }
-    }, 60_000);
+    }
+    startPollingFallback();
   };
 
   const hot = store.currentStatus === 'on';
@@ -721,20 +754,31 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
         </button>
         <button
           onClick={onNotify}
-          aria-label={notifyState === 'subscribed' ? 'Stop notifying' : 'Notify when hot'}
-          aria-pressed={notifyState === 'subscribed'}
+          aria-label={
+            (notifyState === 'subscribed' || notifyState === 'subscribed-polling')
+              ? 'Stop notifying' : 'Notify when hot'
+          }
+          aria-pressed={notifyState === 'subscribed' || notifyState === 'subscribed-polling'}
           title={
-            notifyState === 'subscribed'      ? 'Notifying you when the light flips on'
-            : notifyState === 'denied'        ? 'Notifications blocked — enable in browser settings'
-            : notifyState === 'unsupported'   ? 'Notifications not supported in this browser'
-            : notifyState === 'ios-pwa-needed' ? 'On iOS, tap Share → Add to Home Screen, then reopen — Apple only allows notifications from installed Home Screen apps'
+            notifyState === 'subscribed'
+                ? 'Subscribed via Web Push — you’ll get notifications even when this tab is closed'
+            : notifyState === 'subscribed-polling'
+                ? 'Polling while this panel is open (server hasn’t enabled Web Push)'
+            : notifyState === 'denied'
+                ? 'Notifications blocked — enable in browser settings'
+            : notifyState === 'unsupported'
+                ? 'Notifications not supported in this browser'
+            : notifyState === 'ios-pwa-needed'
+                ? 'On iOS, tap Share → Add to Home Screen, then reopen — Apple only allows notifications from installed Home Screen apps'
             : 'Get a notification when the Hot Light turns on'
           }
           disabled={notifyState === 'denied' || notifyState === 'unsupported' || notifyState === 'ios-pwa-needed'}
           style={{
             width: 48, height: 48, borderRadius: 24, border: 'none',
-            background: notifyState === 'subscribed' ? scheme.primary : scheme.secondaryContainer,
-            color: notifyState === 'subscribed' ? scheme.onPrimary : scheme.onSecondaryContainer,
+            background: (notifyState === 'subscribed' || notifyState === 'subscribed-polling')
+              ? scheme.primary : scheme.secondaryContainer,
+            color: (notifyState === 'subscribed' || notifyState === 'subscribed-polling')
+              ? scheme.onPrimary : scheme.onSecondaryContainer,
             cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             opacity: (notifyState === 'denied'
@@ -744,7 +788,8 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
           <MIcon
             name="notifications_active"
             size={20}
-            color={notifyState === 'subscribed' ? scheme.onPrimary : scheme.onSecondaryContainer}
+            color={(notifyState === 'subscribed' || notifyState === 'subscribed-polling')
+                ? scheme.onPrimary : scheme.onSecondaryContainer}
           />
         </button>
         <button

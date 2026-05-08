@@ -56,6 +56,101 @@ async function fetchHotLight(storeId) {
   return await res.json();
 }
 
+// ── Web Push subscription helpers ──────────────────────────────────────
+//
+// The flow:
+//   1. getVapidPublicKey() — cached for the page lifetime.
+//   2. subscribeStore(id)  — registers SW, gets browser PushSubscription
+//                            (idempotent), POSTs it to /subscriptions.
+//   3. unsubscribeStore(id) — DELETEs the row server-side. We do NOT
+//                            call browser pushManager.unsubscribe(),
+//                            because the same subscription may still
+//                            be in use for other stores.
+//
+// Errors:
+//   - PUSH_DISABLED: server returned 503 push_disabled. Caller should
+//     fall back to in-page polling (BottomSheet has that path).
+//   - PUSH_UNSUPPORTED: this browser lacks Service Worker / PushManager.
+//   - Anything else: surface for UI display.
+
+const PUSH_DISABLED = 'PUSH_DISABLED';
+const PUSH_UNSUPPORTED = 'PUSH_UNSUPPORTED';
+
+let _vapidKeyCache = null;
+
+async function getVapidPublicKey() {
+  if (_vapidKeyCache) return _vapidKeyCache;
+  const res = await fetch(`${API_BASE}/vapid-public-key`);
+  if (res.status === 503) throw new Error(PUSH_DISABLED);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  _vapidKeyCache = body.publicKey;
+  return _vapidKeyCache;
+}
+
+// VAPID returns URL-safe base64; PushManager wants Uint8Array.
+function urlBase64ToUint8Array(base64) {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const std = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(std);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window;
+}
+
+async function ensureSwReady() {
+  if (!pushSupported()) throw new Error(PUSH_UNSUPPORTED);
+  return await navigator.serviceWorker.ready;
+}
+
+async function subscribeStore(storeId) {
+  const reg = await ensureSwReady();
+  const vapid = await getVapidPublicKey();   // may throw PUSH_DISABLED
+  // pushManager.subscribe is idempotent: returns the existing
+  // subscription if one exists for this VAPID key.
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(vapid),
+  });
+  const json = sub.toJSON();
+  const res = await fetch(`${API_BASE}/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      storeId,
+      subscription: {
+        endpoint: json.endpoint,
+        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+      },
+    }),
+  });
+  if (res.status === 503) throw new Error(PUSH_DISABLED);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
+async function unsubscribeStore(storeId) {
+  if (!pushSupported()) return;
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return;   // nothing to do
+  const res = await fetch(`${API_BASE}/subscriptions`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storeId, endpoint: sub.endpoint }),
+  });
+  // Don't call sub.unsubscribe() — other stores may be using the
+  // same browser subscription. The server-side DELETE is what
+  // changes this store's notification state.
+  if (!res.ok && res.status !== 404 && res.status !== 503) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+}
+
 // ── relative time formatter for `lastFlippedAt` ─────────────────────────
 function relativeTime(iso) {
   if (!iso) return null;
@@ -143,7 +238,12 @@ function mockUptime(seed, bucket) {
 }
 
 Object.assign(window, {
-  KREMEING_API: { fetchNearbyStores, searchStores, fetchUptime, fetchHotLight },
+  KREMEING_API: {
+    fetchNearbyStores, searchStores, fetchUptime, fetchHotLight,
+    getVapidPublicKey, subscribeStore, unsubscribeStore,
+    pushSupported,
+    PUSH_DISABLED, PUSH_UNSUPPORTED,
+  },
   KREMEING_USE_MOCKS: USE_MOCKS,
   MOCK_STORES,
   mockUptime,
