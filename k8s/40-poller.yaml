@@ -1,0 +1,72 @@
+# Poller deployment: singleton. Strategy=Recreate guarantees the old
+# pod is fully gone before the new one starts, so we never have two
+# pollers hammering Krispy Kreme at the same time during rollout.
+#
+# Why Deployment instead of StatefulSet or CronJob:
+#   - Deployment with replicas=1 + Recreate is the simplest "exactly one"
+#     primitive. StatefulSet adds ordering/identity guarantees we don't
+#     need (the poller is stateless — Postgres holds all state).
+#   - CronJob would work too (one tick per cron firing) but you'd lose
+#     in-process logs/metrics across ticks, and 5-min cron is the lower
+#     bound for stock CronJob scheduling reliability.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kremeing-poller
+  namespace: kremeing
+  labels:
+    app.kubernetes.io/name: kremeing
+    app.kubernetes.io/component: poller
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kremeing
+      app.kubernetes.io/component: poller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kremeing
+        app.kubernetes.io/component: poller
+    spec:
+      containers:
+        - name: poller
+          image: kremeing:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: KREMEING_ROLE
+              value: poller
+            - name: KREMEING_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kremeing-database
+                  key: url
+            - name: ASPNETCORE_URLS
+              value: http://0.0.0.0:8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 15
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

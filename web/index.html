@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#FBFAF8" />
+  <title>Hot Now — Krispy Kreme Locator</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght,wdth@8..144,300..900,75..125&display=swap" />
+
+  <!-- Leaflet (real pannable map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: #F4F2EE;
+      font-family: "Roboto Flex", "Roboto", system-ui, -apple-system, sans-serif;
+      color: #1B1B1B;
+      overflow: hidden;
+      overscroll-behavior: none;
+      -webkit-font-smoothing: antialiased;
+    }
+    #root { position: fixed; inset: 0; overflow: hidden; }
+    button { -webkit-tap-highlight-color: transparent; font-family: inherit; }
+
+    /* ── Animations ──────────────────────────────────────────────────── */
+    @keyframes pin-pulse {
+      0%   { transform: translate(-50%, -50%) scale(0.6); opacity: 0.85; }
+      100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+    }
+    @keyframes dial-glow {
+      0%, 100% { filter: brightness(1); }
+      50%      { filter: brightness(1.18); }
+    }
+    @keyframes sheet-rise {
+      from { transform: translateY(110%); }
+      to   { transform: translateY(0); }
+    }
+    @keyframes sheet-fall {
+      from { transform: translateY(0);    opacity: 1; }
+      to   { transform: translateY(110%); opacity: 0; }
+    }
+    @keyframes overlay-fade-out {
+      from { opacity: 1; }
+      to   { opacity: 0; transform: translateY(8px); }
+    }
+
+    /* Honor users who request reduced motion: kill the looping pulses
+       and the glow throb, keep the sheet entrance/exit (single short
+       transitions, no looping) so layout still feels continuous. */
+    @media (prefers-reduced-motion: reduce) {
+      .kk-pin-halo,
+      .kk-userdot-pulse,
+      .kk-glow-dot {
+        animation: none !important;
+      }
+    }
+
+    /* ── Leaflet container styling ──────────────────────────────────── */
+    .leaflet-container { background: #F4F2EE; font-family: inherit; }
+    .leaflet-control-attribution {
+      background: rgba(255,255,255,0.7);
+      backdrop-filter: blur(6px);
+      font-size: 10px;
+    }
+    .leaflet-bar a { background: #FBFAF8; color: #1B1B1B; }
+    .leaflet-bar a:hover { background: #EEECEA; }
+
+    /* ── Custom map markers (HTML built in pins.jsx & map.jsx) ─────── */
+    .kk-pin-icon, .kk-userdot-icon {
+      background: transparent !important;
+      border: none !important;
+    }
+    .kk-pin {
+      position: relative;
+      width: 100%; height: 100%;
+    }
+    .kk-pin-halo {
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      pointer-events: none;
+      animation: pin-pulse 2.6s cubic-bezier(0.2, 0.9, 0.3, 1.05) infinite;
+    }
+    .kk-pin-core {
+      position: absolute;
+      left: 50%; top: 50%;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      transition: transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.05);
+    }
+    .kk-pin-flame { display: inline-flex; }
+    .kk-pin-dot { display: inline-block; border-radius: 50%; }
+
+    .kk-userdot {
+      position: relative;
+      width: 100%; height: 100%;
+    }
+    .kk-userdot-pulse {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(52,120,246,0.35) 0%, transparent 70%);
+      animation: pin-pulse 3s ease-out infinite;
+    }
+    .kk-userdot-core {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: #3478F6;
+      border: 3px solid #FBFAF8;
+      box-shadow: 0 0 0 6px rgba(52,120,246,0.18), 0 4px 10px rgba(0,0,0,0.15);
+      transform: translate(-50%, -50%);
+    }
+
+    /* ── Layout: phone-first; ≥600px constrains UI to a centered column ─ */
+    /* z-indexes sit above Leaflet's controls (1000) and panes (≤700) */
+    .app-top-bar {
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 16px);
+      left: 12px; right: 12px;
+      z-index: 1500;
+    }
+    .app-bottom-sheet {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 1600;
+      border-top-left-radius: 28px;
+      border-top-right-radius: 28px;
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px);
+    }
+    .app-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 1700;
+    }
+
+    @media (min-width: 600px) {
+      .app-top-bar {
+        left: 0; right: 0; margin: 0 auto;
+        width: calc(100% - 32px);
+        max-width: 460px;
+      }
+      .app-bottom-sheet {
+        left: 0; right: 0; margin: 0 auto;
+        width: calc(100% - 32px);
+        max-width: 460px;
+        bottom: 16px;
+        border-radius: 28px;
+        overflow: hidden;
+        padding-bottom: 28px;
+      }
+      .app-overlay {
+        top: 16px; bottom: 16px;
+        left: 0; right: 0; margin: 0 auto;
+        width: calc(100% - 32px);
+        max-width: 460px;
+        border-radius: 28px;
+        overflow: hidden;
+      }
+    }
+  </style>
+
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="stores.js"></script>
+  <script type="text/babel" src="m3-tokens.jsx"></script>
+  <script type="text/babel" src="pins.jsx"></script>
+  <script type="text/babel" src="map.jsx"></script>
+  <script type="text/babel" src="islands.jsx"></script>
+
+  <script type="text/babel">
+    const FALLBACK_CENTER = { lat: 40.7589, lng: -73.9851 }; // Times Square
+
+    function App() {
+      const scheme = window.M3_SCHEMES.light;
+      const [center, setCenter] = React.useState(FALLBACK_CENTER);
+      const [userPos, setUserPos] = React.useState(null);
+      const [locating, setLocating] = React.useState(true);
+      const [stores, setStores] = React.useState([]);
+      const [error, setError] = React.useState(null);
+      const [selected, setSelected] = React.useState(null);
+      const [listOpen, setListOpen] = React.useState(false);
+
+      // ── Geolocate; bump timeout to 10s (cold GPS lock can be slow) and
+      //    expose the in-flight state to the UI so we don't silently jump
+      //    to NYC while the phone is still locating.
+      React.useEffect(() => {
+        if (!navigator.geolocation) {
+          setLocating(false);
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            setLocating(false);
+          },
+          () => setLocating(false),
+          { timeout: 10_000, maximumAge: 60_000 }
+        );
+      }, []);
+
+      // ── Fetch nearby stores. With ?mock=1, fall back to mocks on
+      //    failure; otherwise surface the error so users don't see fake
+      //    data dressed up as real stores.
+      React.useEffect(() => {
+        let cancelled = false;
+        setError(null);
+        window.KREMEING_API.fetchNearbyStores(center.lat, center.lng)
+          .then((s) => { if (!cancelled) { setStores(s); setError(null); } })
+          .catch((err) => {
+            if (cancelled) return;
+            console.warn('[kremeing] /stores/nearby failed:', err.message);
+            if (window.KREMEING_USE_MOCKS) {
+              setStores(window.MOCK_STORES);
+            } else {
+              setStores([]);
+              setError(err.message || 'Could not load nearby stores');
+            }
+          });
+        return () => { cancelled = true; };
+      }, [center.lat, center.lng]);
+
+      // ── Uptime fetch — same gating: real errors stay errors unless
+      //    the page explicitly asked for mocks.
+      const fetchUptimeBuckets = React.useCallback(async (storeId, bucket) => {
+        try {
+          return await window.KREMEING_API.fetchUptime(storeId, bucket);
+        } catch (err) {
+          console.warn(`[kremeing] /stores/${storeId}/uptime failed:`, err.message);
+          if (window.KREMEING_USE_MOCKS) return window.mockUptime(storeId, bucket);
+          return [];
+        }
+      }, []);
+
+      const hotCount = stores.filter((s) => s.currentStatus === 'on').length;
+      const selectedStore = stores.find((s) => s.id === selected);
+
+      const onSelect = React.useCallback((id) => {
+        setSelected((cur) => (cur === id ? null : id));
+      }, []);
+
+      // While a sheet or full-screen overlay is open, the map + top bar
+      // become non-interactive — `inert` keeps tab focus, screen readers,
+      // and pointer events out of the underlying content.
+      const sheetOpen = selectedStore != null;
+      const overlayOpen = listOpen;
+      const underlayInert = sheetOpen || overlayOpen;
+
+      return (
+        <div style={{
+          position: 'fixed', inset: 0,
+          color: scheme.onSurface, background: scheme.surface,
+        }}>
+          <div inert={underlayInert ? true : undefined} style={{ position: 'absolute', inset: 0 }}>
+            <MapView
+              stores={stores}
+              scheme={scheme}
+              selected={selected}
+              onSelect={onSelect}
+              center={center}
+              userPos={userPos}
+            />
+
+            <TopAppBar
+              hotCount={hotCount}
+              scheme={scheme}
+              onOpenList={() => setListOpen(true)}
+              locating={locating}
+              error={error}
+            />
+          </div>
+
+          {sheetOpen && (
+            <BottomSheet
+              key={selectedStore.id}
+              store={selectedStore}
+              scheme={scheme}
+              onClose={() => setSelected(null)}
+              fetchUptimeBuckets={fetchUptimeBuckets}
+            />
+          )}
+
+          {overlayOpen && (
+            <StoreList
+              stores={stores}
+              scheme={scheme}
+              onClose={() => setListOpen(false)}
+              onPick={(id) => { setListOpen(false); setSelected(id); }}
+            />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,333 @@
+openapi: 3.1.0
+info:
+  title: Kremeing
+  version: 0.2.0
+  summary: Hot-light tracking for every Krispy Kreme location in the US.
+  description: |
+    Public read API for the Krispy Kreme hot-light status of every US store.
+
+    Backed by a poller that hits Krispy Kreme's official store API every five
+    minutes and records *flip events* — the moments a store's hot light goes
+    on or off. Clients get both the live snapshot and a historical view they
+    can render as uptime graphs or trend heatmaps.
+
+    The API only stores changes plus a "last polled at" sentinel, so each
+    store's footprint stays tiny while the staleness of the data remains
+    observable.
+
+servers:
+  - url: http://localhost:5234
+    description: Local dev (in-memory or Postgres-backed depending on KREMEING_DATABASE_URL)
+
+tags:
+  - name: live
+    description: Live status sourced directly from Krispy Kreme.
+  - name: history
+    description: Flip events and uptime aggregations from our local store.
+  - name: discovery
+    description: Find stores by location.
+  - name: meta
+    description: Service metadata.
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Service is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+
+  /stores/nearby:
+    get:
+      tags: [discovery]
+      summary: Find stores near a coordinate
+      description: |
+        Proxies Krispy Kreme's `/shops` endpoint and enriches each entry
+        with our cached temporal context (`lastFlippedAt`, `firstObservedAt`).
+        Upstream caps the result at 12 — `limit` only narrows further.
+      parameters:
+        - in: query
+          name: lat
+          required: true
+          schema: { type: number, format: double }
+          example: 47.6062
+        - in: query
+          name: lng
+          required: true
+          schema: { type: number, format: double }
+          example: -122.3321
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 12, default: 12 }
+      responses:
+        '200':
+          description: Nearby stores with current hot-light status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NearbyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+
+  /stores/{id}/hot-light:
+    get:
+      tags: [live]
+      summary: Current hot-light status for one store
+      description: |
+        Live read; goes upstream every call. Use this for "is the light
+        on right now" UIs. For graphs and trends, use `/uptime` instead.
+      parameters:
+        - $ref: '#/components/parameters/StoreId'
+      responses:
+        '200':
+          description: Status snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotLightStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/StoreNotFound'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+
+  /stores/{id}/history:
+    get:
+      tags: [history]
+      summary: Flip events for one store within a time range
+      description: |
+        Returns every status flip we observed for the store inside the range,
+        oldest first. The first entry per store is a `FirstObservation`
+        anchor (when we started tracking), not a real flip — pair entries
+        sequentially to reconstruct intervals.
+
+        Defaults to the last 7 days if `since`/`until` are omitted.
+      parameters:
+        - $ref: '#/components/parameters/StoreId'
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+          description: Inclusive lower bound (ISO-8601 with offset).
+        - in: query
+          name: until
+          schema: { type: string, format: date-time }
+          description: Exclusive upper bound (ISO-8601 with offset).
+      responses:
+        '200':
+          description: Flip events within the range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HotLightHistory'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/StoreNotFound'
+
+  /stores/{id}/uptime:
+    get:
+      tags: [history]
+      summary: Bucketed uptime data for charting
+      description: |
+        Aggregates the flip log into time-series buckets. `observedSeconds`
+        may be less than `totalSeconds` when poll gaps exist — clients
+        should render those gaps as unknown rather than as 0% uptime.
+
+        Defaults: bucket=hour, range=last 24h (or last 30d when bucket=day).
+      parameters:
+        - $ref: '#/components/parameters/StoreId'
+        - in: query
+          name: bucket
+          schema:
+            type: string
+            enum: [hour, day]
+            default: hour
+        - in: query
+          name: since
+          schema: { type: string, format: date-time }
+        - in: query
+          name: until
+          schema: { type: string, format: date-time }
+      responses:
+        '200':
+          description: Uptime buckets.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UptimeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/StoreNotFound'
+
+components:
+  parameters:
+    StoreId:
+      in: path
+      name: id
+      required: true
+      description: Krispy Kreme `shopId` (positive integer).
+      schema:
+        type: integer
+        minimum: 1
+      example: 899
+
+  responses:
+    BadRequest:
+      description: Malformed request — query param missing/wrong type, or invalid path id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    StoreNotFound:
+      description: No store exists with that `shopId` (live), or we've never observed it (history).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UpstreamUnavailable:
+      description: The Krispy Kreme upstream API failed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    HotLightStatusValue:
+      type: string
+      enum: [on, off, unknown]
+      description: Wire encoding of the live status. Always lowercase ASCII.
+
+    HotLightStatus:
+      type: object
+      required: [storeId, status, observedAt]
+      properties:
+        storeId: { type: integer, example: 899 }
+        status:  { $ref: '#/components/schemas/HotLightStatusValue' }
+        observedAt:
+          type: string
+          format: date-time
+          description: When the response was generated, not necessarily when the light flipped.
+
+    NearbyQuery:
+      type: object
+      required: [latitude, longitude, limit]
+      properties:
+        latitude:  { type: number, format: double }
+        longitude: { type: number, format: double }
+        limit:     { type: integer }
+
+    NearbyStore:
+      type: object
+      required: [id, name, address, latitude, longitude, distanceMiles, currentStatus]
+      properties:
+        id:             { type: integer, example: 899 }
+        name:           { type: string,  example: "Krispy Kreme Seattle - 1st Ave South" }
+        address:        { type: string,  example: "1900 1st Ave S, Seattle, WA 98134" }
+        latitude:       { type: number,  format: double }
+        longitude:      { type: number,  format: double }
+        distanceMiles:  { type: number,  format: double }
+        currentStatus:  { $ref: '#/components/schemas/HotLightStatusValue' }
+        lastFlippedAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Null until a flip is observed; `firstObservedAt` is set first.
+        firstObservedAt:
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Null when the store has never been observed by us.
+
+    NearbyResponse:
+      type: object
+      required: [query, stores]
+      properties:
+        query:  { $ref: '#/components/schemas/NearbyQuery' }
+        stores:
+          type: array
+          items: { $ref: '#/components/schemas/NearbyStore' }
+
+    HotLightFlip:
+      type: object
+      required: [storeId, status, observedAt]
+      properties:
+        storeId:    { type: integer, example: 899 }
+        status:     { $ref: '#/components/schemas/HotLightStatusValue' }
+        observedAt: { type: string, format: date-time }
+
+    HotLightHistory:
+      type: object
+      required: [storeId, rangeStart, rangeEnd, flips]
+      properties:
+        storeId:    { type: integer }
+        rangeStart: { type: string, format: date-time }
+        rangeEnd:   { type: string, format: date-time }
+        flips:
+          type: array
+          items: { $ref: '#/components/schemas/HotLightFlip' }
+
+    UptimeBucket:
+      type: object
+      required: [startUtc, endUtc, onSeconds, offSeconds, observedSeconds, totalSeconds, fractionOn]
+      properties:
+        startUtc:        { type: string, format: date-time }
+        endUtc:          { type: string, format: date-time }
+        onSeconds:       { type: number, format: double }
+        offSeconds:      { type: number, format: double }
+        observedSeconds: { type: number, format: double }
+        totalSeconds:    { type: number, format: double }
+        fractionOn:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: |
+            On-seconds divided by *observed* seconds (not total). Use
+            `observedSeconds / totalSeconds` to detect partial coverage.
+
+    UptimeResponse:
+      type: object
+      required: [storeId, bucket, rangeStart, rangeEnd, buckets]
+      properties:
+        storeId:    { type: integer }
+        bucket:
+          type: string
+          enum: [hour, day]
+        rangeStart: { type: string, format: date-time }
+        rangeEnd:   { type: string, format: date-time }
+        buckets:
+          type: array
+          items: { $ref: '#/components/schemas/UptimeBucket' }
+
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          enum:
+            - store_not_found
+            - upstream_unavailable
+            - invalid_store_id
+            - missing_query_param
+            - invalid_bucket
+            - not_found
+          description: Stable machine-readable error code.
+        message:
+          type: string
+          description: Human-readable explanation. May change between releases.

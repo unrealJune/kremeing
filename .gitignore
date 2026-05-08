@@ -1,0 +1,52 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.dll
+*.exe
+*.pdb
+.vs/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Rider / Visual Studio Code
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local secrets — never commit
+**/appsettings.Local.json
+**/secrets.json
+**/.env
+**/.env.local
+k8s/10-database-secret.yaml      # the *example* template is committed; the real one is not
+*.pem
+*.key
+
+# Build/publish output
+publish/
+out/
+
+# Local scratch
+/tmp/
+*.log

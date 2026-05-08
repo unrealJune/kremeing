@@ -1,0 +1,91 @@
+# In-cluster Postgres for dev/staging. For production, swap this out
+# for a managed Postgres (RDS, Cloud SQL, Neon, etc.) and just point
+# `kremeing-database.url` at it — the API and Poller don't care where
+# Postgres is hosted.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: kremeing-postgres
+  namespace: kremeing
+  labels:
+    app.kubernetes.io/name: kremeing
+    app.kubernetes.io/component: postgres
+spec:
+  clusterIP: None    # headless, addressed by StatefulSet pod DNS
+  selector:
+    app.kubernetes.io/name: kremeing
+    app.kubernetes.io/component: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kremeing-postgres
+  namespace: kremeing
+  labels:
+    app.kubernetes.io/name: kremeing
+    app.kubernetes.io/component: postgres
+spec:
+  serviceName: kremeing-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kremeing
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kremeing
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: kremeing
+            - name: POSTGRES_USER
+              value: kremeing
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kremeing-database
+                  key: postgres-password
+            # Subdir so initdb works on PVCs that include a `lost+found`.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kremeing", "-d", "kremeing"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kremeing"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1
+              memory: 1Gi
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 10Gi

@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kremeing.Api/Kremeing.Api.fsproj" />
+    <Project Path="src/Kremeing.Contracts/Kremeing.Contracts.fsproj" />
+    <Project Path="src/Kremeing.Core/Kremeing.Core.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kremeing.Api.Tests/Kremeing.Api.Tests.fsproj" />
+    <Project Path="tests/Kremeing.Contract.Tests/Kremeing.Contract.Tests.fsproj" />
+    <Project Path="tests/Kremeing.Core.Tests/Kremeing.Core.Tests.fsproj" />
+    <Project Path="tests/Kremeing.Postgres.Tests/Kremeing.Postgres.Tests.fsproj" />
+  </Folder>
+</Solution>

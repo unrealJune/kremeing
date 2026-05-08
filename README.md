@@ -1,0 +1,213 @@
+# kremeing
+
+Hot-light tracking for every Krispy Kreme location in the US.
+
+A small F# / ASP.NET Core service that polls Krispy Kreme's public store
+endpoints every five minutes, records flip events (the moments a store's
+hot light goes on or off), and exposes the data through a typed HTTP API
+plus an OpenAPI 3.1 reference at `/docs`.
+
+> **Independent project.** Not affiliated with, endorsed by, or sponsored
+> by Krispy Kreme Doughnut Corporation. *Krispy Kreme*, *Hot Light*, and
+> *Original Glazed* are trademarks of their respective owners. This
+> project is not a Krispy Kreme product and reflects only what is
+> publicly visible at `krispykreme.com` and `site.krispykreme.com`.
+
+## What it does
+
+```
+                 ┌──────────────┐         ┌──────────────┐
+   clients  ───► │ kremeing-api │ ──reads─┤              │
+                 │  replicas: N │         │   Postgres   │
+                 └──────────────┘         │              │
+                                          │              │
+                 ┌──────────────┐         │              │
+                 │ kremeing-    │ ─writes►│              │
+                 │  poller      │         │              │
+                 │  replicas: 1 │         └──────────────┘
+                 └──────────────┘
+                       │  every 5 min:
+                       ▼  one call per (city, state) → up to 12 stores per call
+                  api.krispykreme.com
+                  site.krispykreme.com
+```
+
+- **Discovery**: scrapes `site.krispykreme.com` once on startup and again
+  daily, then resolves each (city, state) to upstream `shopId`s via
+  `api.krispykreme.com/shops/search`. Yields ~344 US stores.
+- **Flip-only storage**: only status *changes* land in `flip_events`. A
+  separate `store_status` row per shop tracks `last_polled_at` so
+  staleness stays observable even when nothing flipped.
+- **Two roles, one binary**: `KREMEING_ROLE=api` for HTTP-only replicas,
+  `KREMEING_ROLE=poller` for the singleton writer. Both share Postgres.
+
+## API at a glance
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Liveness probe |
+| `GET /docs` | Rendered OpenAPI 3.1 reference (Redoc) |
+| `GET /openapi.yaml` | Raw spec |
+| `GET /stores/nearby?lat=&lng=&limit=` | Up to 12 stores nearest a coordinate, enriched with cached temporal context |
+| `GET /stores/{id}/hot-light` | Live status for one store |
+| `GET /stores/{id}/history?since=&until=` | Flip events in a time range |
+| `GET /stores/{id}/uptime?bucket=hour\|day&since=&until=` | Bucketed time-series for charting |
+
+`{id}` is Krispy Kreme's `shopId` (e.g. SODO Seattle = `899`).
+
+## Quickstart
+
+### Run locally without Postgres
+
+```bash
+dotnet run --project src/Kremeing.Api
+# → http://localhost:5234
+# Observations are kept in memory; history is lost on restart.
+```
+
+### Run locally with Postgres (recommended)
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+createdb kremeing
+
+KREMEING_DATABASE_URL="Host=localhost;Database=kremeing;Username=$USER" \
+  dotnet run --project src/Kremeing.Api
+```
+
+Both URL form (`postgres://user:pass@host:port/db`) and Npgsql key=value
+form work — Npgsql normalizes them.
+
+### Try it
+
+```bash
+curl http://localhost:5234/health
+curl http://localhost:5234/stores/899/hot-light
+curl "http://localhost:5234/stores/nearby?lat=47.6&lng=-122.3&limit=3"
+open  http://localhost:5234/docs       # rendered OpenAPI reference
+```
+
+## Tests
+
+```bash
+dotnet test                # everything: Core + Api + Postgres + Contract
+
+# Postgres tests skip cleanly if no DB is reachable. To run them, either
+# have a local Postgres up (peer auth on $USER) or set:
+KREMEING_TEST_DATABASE_URL="Host=...;Database=kremeing_test;Username=...;Password=..." \
+  dotnet test
+```
+
+131 tests across four projects:
+
+| Project | Tests | What it verifies |
+|---|---:|---|
+| `Kremeing.Core.Tests` | 38 | Pure functions: validation, DTO mapping, uptime bucketing |
+| `Kremeing.Api.Tests` | 55 | LiveApi adapter, Discovery, in-memory observations, poller |
+| `Kremeing.Postgres.Tests` | 12 | Real-DB observations contract (mirrors in-memory) |
+| `Kremeing.Contract.Tests` | 26 | HTTP wire-level, including OpenAPI completeness |
+
+## Project layout
+
+```
+kremeing/
+├── src/
+│   ├── Kremeing.Contracts/   wire DTOs + domain types (no deps)
+│   ├── Kremeing.Core/        pure logic: validation, mapping, uptime math, port types
+│   └── Kremeing.Api/         adapters + Giraffe handlers + composition root
+│       ├── LiveApi.fs        api.krispykreme.com client
+│       ├── Discovery.fs      site.krispykreme.com scraper + registry resolver
+│       ├── Observations.fs   in-memory flip-only store
+│       ├── Postgres.fs       Postgres-backed store (same surface)
+│       ├── Poller.fs         BackgroundService that ticks every 5 min
+│       ├── HttpHandlers.fs   Giraffe routes + DTOs
+│       └── openapi.yaml      hand-written OpenAPI 3.1 spec
+├── tests/
+│   ├── Kremeing.Core.Tests/
+│   ├── Kremeing.Api.Tests/
+│   ├── Kremeing.Postgres.Tests/
+│   ├── Kremeing.Contract.Tests/
+│   └── fixtures/             real captured KK responses (~50 KB)
+├── k8s/                      manifests + README — see k8s/README.md
+├── .github/workflows/
+│   ├── ci.yml                test + manifest validation + image build
+│   └── release.yml           multi-arch GHCR publish on v*.*.* tags
+└── Dockerfile                multi-stage SDK→aspnet, non-root, port 8080
+```
+
+## Configuration
+
+| Env var | Required | Default | Notes |
+|---|---|---|---|
+| `KREMEING_DATABASE_URL` | recommended | — (in-memory) | URL or Npgsql DSN. Falls back to in-memory if unset. |
+| `KREMEING_ROLE` | no | `all` | `api` (HTTP only), `poller` (HTTP + poller), `all` (both — local dev default) |
+| `KREMEING_TEST_DATABASE_URL` | no | localhost peer | Used only by `Kremeing.Postgres.Tests`. |
+| `ASPNETCORE_URLS` | no | `http://localhost:5000` | Standard ASP.NET Core. |
+
+## Deployment
+
+See [`k8s/README.md`](k8s/README.md) for full apply order and a managed-Postgres
+swap. TL;DR:
+
+```bash
+# Build and push the image (release pipeline does this on v*.*.* tags).
+docker build -t ghcr.io/<owner>/kremeing:0.2.0 .
+docker push ghcr.io/<owner>/kremeing:0.2.0
+
+# Apply.
+cp k8s/10-database-secret.example.yaml k8s/10-database-secret.yaml
+# … edit CHANGEME values …
+kubectl apply -f k8s/
+```
+
+## CI / release
+
+- **`ci.yml`** runs on push-to-main and PRs: `dotnet test` against a real
+  Postgres service, `kubectl --dry-run=client` on every manifest, and a
+  `docker build` smoke test. Test results upload as artifacts.
+- **`release.yml`** runs on `v*.*.*` tags: builds **multi-arch**
+  (`linux/amd64` + `linux/arm64`), pushes to GHCR with three tags
+  (full version, stripped semver, `latest`), and writes a markdown
+  summary to the run page.
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0   # → ghcr.io/<owner>/kremeing:0.2.0
+```
+
+## Architecture notes worth reading
+
+- **Ports as F# function types.** `Ports.GetHotLightStatus`,
+  `RecordObservation`, `GetHistory`, etc. are plain function types
+  (`StoreId -> Async<Result<...>>`). Stubbing in a test is just a
+  different lambda — no mocking framework. Adapters are values, not
+  classes implementing interfaces.
+- **Total mappings.** `Mapping.statusToWire`, `errorToStatusCode`,
+  `errorToDto` are exhaustive matches. Adding a `StoreError` case is a
+  compile error until you decide its HTTP shape — the type system
+  enforces wire-contract completeness.
+- **Flip-only with staleness sentinel.** `flip_events` only stores
+  changes; `store_status.last_polled_at` advances on every successful
+  poll regardless of outcome. Clients can detect "the poller is down"
+  by comparing `last_polled_at` to wall-clock without keeping per-poll
+  rows.
+- **Discovery via two-phase scrape.** Walk root → state pages on
+  `site.krispykreme.com`, then resolve each `(city, state)` to
+  `shopId`s via `api.krispykreme.com/shops/search`. ~150 API calls,
+  ~30 seconds, dedupes ~344 stores.
+
+See `k8s/README.md` for deployment-shape rationale.
+
+## Responsible use
+
+The poller calls `api.krispykreme.com` once per unique `(city, state)`
+every 5 minutes — about 30 requests per minute sustained, well under
+typical rate limits and similar to what a single web user does in a
+browsing session. **Forks should keep this cadence or extend it, not
+shorten it.** This project is intended to be a polite citizen of
+infrastructure that is not designed for high-frequency third-party
+polling.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).

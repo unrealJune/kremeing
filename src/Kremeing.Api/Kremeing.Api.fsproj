@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Adapters.fs" />
+    <Compile Include="LiveApi.fs" />
+    <Compile Include="Discovery.fs" />
+    <Compile Include="Observations.fs" />
+    <Compile Include="Postgres.fs" />
+    <Compile Include="Poller.fs" />
+    <Compile Include="HttpHandlers.fs" />
+    <Compile Include="Composition.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="openapi.yaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kremeing.Contracts\Kremeing.Contracts.fsproj" />
+    <ProjectReference Include="..\Kremeing.Core\Kremeing.Core.fsproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Giraffe" Version="8.2.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+  </ItemGroup>
+
+</Project>

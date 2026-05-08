@@ -1,0 +1,32 @@
+# Optional — exposes the API outside the cluster. Adjust ingressClassName
+# and host to match your environment. For internal-only deployments,
+# delete this file and reach kremeing-api via the in-cluster Service.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kremeing
+  namespace: kremeing
+  labels:
+    app.kubernetes.io/name: kremeing
+    app.kubernetes.io/component: api
+  annotations:
+    # nginx-ingress example. Swap for your controller's annotations.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: kremeing.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kremeing-api
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - kremeing.example.com
+      secretName: kremeing-tls   # cert-manager or pre-provisioned

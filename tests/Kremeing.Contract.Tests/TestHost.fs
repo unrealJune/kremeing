@@ -1,0 +1,62 @@
+module Kremeing.Contract.Tests.TestHost
+
+open System
+open System.Net.Http
+open Microsoft.AspNetCore.Builder
+open Microsoft.AspNetCore.Hosting
+open Microsoft.AspNetCore.TestHost
+open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Hosting
+open Kremeing.Contracts.Domain
+open Kremeing.Api
+open Kremeing.Core
+
+/// Spins up an in-process Giraffe server with the given Deps, returns
+/// an HttpClient bound to it. Each test gets its own host so stubs
+/// and state don't leak between tests.
+let start (deps: HttpHandlers.Deps) : HttpClient =
+    let builder =
+        Host.CreateDefaultBuilder()
+            .ConfigureWebHost(fun web ->
+                web.UseTestServer()
+                   .ConfigureServices(fun s ->
+                       Program.configureServices s)
+                   .Configure(fun app ->
+                       Program.configureApp deps app)
+                |> ignore)
+    let host = builder.Start()
+    host.GetTestClient()
+
+/// Stub builders. Tests describe behavior at the port boundary —
+/// what the upstream "knows" — and the contract layer is exercised
+/// end to end against that fixed reality.
+module Stubs =
+
+    let observation (id: int) (status: HotLightStatus) (at: DateTimeOffset) =
+        { StoreId = StoreId id; Status = status; ObservedAt = at }
+
+    let alwaysReturns (obs: HotLightObservation) : Ports.GetHotLightStatus =
+        fun _ -> async { return Ok obs }
+
+    let alwaysFails (err: StoreError) : Ports.GetHotLightStatus =
+        fun _ -> async { return Error err }
+
+    let private notUsedNearby : HttpHandlers.SearchNearby =
+        fun _ -> async { return Error (UpstreamUnavailable "stub: search not configured") }
+
+    let private notUsedHistory : Ports.GetHistory =
+        fun _ -> async { return Error (UpstreamUnavailable "stub: history not configured") }
+
+    let private notUsedStatus : Ports.GetStoreStatus =
+        fun id -> async { return Error (StoreNotFound id) }
+
+    let private epoch = DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
+
+    /// All-stubbed Deps. Tests override only the fields they exercise.
+    let deps : HttpHandlers.Deps = {
+        GetHotLightStatus = alwaysFails (UpstreamUnavailable "stub: not configured")
+        SearchNearby = notUsedNearby
+        History = notUsedHistory
+        Status = notUsedStatus
+        Now = fun () -> epoch
+    }

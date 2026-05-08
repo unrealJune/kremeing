@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+tests/
+.git/
+.gitignore
+.vscode/
+.vs/
+.idea/
+*.swp
+*.user
+*.suo
+TestResults/

@@ -1,0 +1,579 @@
+// M3 islands — top search bar, list overlay, bottom sheet, charts.
+// Aligned with NearbyStore + UptimeBucket from openapi.yaml: store fields
+// limited to what the contract returns (no rating, no hours, no nextHot).
+
+// ────────────────────────────────────────────────────────────────────────
+// Top search bar — also renders the locating/error states in-place so the
+// user sees what's happening without a separate banner.
+// ────────────────────────────────────────────────────────────────────────
+function TopAppBar({ hotCount, scheme, onOpenList, locating, error }) {
+  let dotColor, dotShadow, label;
+  if (error) {
+    dotColor = scheme.tertiary;
+    dotShadow = `0 0 0 4px ${scheme.tertiary}1F`;
+    label = 'Offline · couldn’t reach the API';
+  } else if (locating) {
+    dotColor = scheme.outline;
+    dotShadow = 'none';
+    label = 'Locating…';
+  } else {
+    dotColor = hotCount > 0 ? scheme.primary : scheme.outline;
+    dotShadow = hotCount > 0 ? `0 0 0 4px ${scheme.primary}1F` : 'none';
+    label = `${hotCount} ${hotCount === 1 ? 'store' : 'stores'} hot now`;
+  }
+
+  return (
+    <div className="app-top-bar">
+      <button
+        onClick={onOpenList}
+        disabled={Boolean(error)}
+        style={{
+          width: '100%',
+          background: scheme.surfaceContainerHigh,
+          borderRadius: 28,
+          height: 56,
+          display: 'flex', alignItems: 'center',
+          padding: '0 16px',
+          gap: 12,
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 4px 14px rgba(0,0,0,0.06)',
+          border: 'none',
+          cursor: error ? 'default' : 'pointer', textAlign: 'left',
+          fontFamily: 'inherit',
+          opacity: error ? 0.85 : 1,
+        }}
+      >
+        <MIcon name="search" size={22} color={scheme.onSurfaceVariant} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: dotColor,
+            flexShrink: 0,
+            boxShadow: dotShadow,
+          }} />
+          <span style={{
+            flex: 1,
+            fontSize: 16, color: scheme.onSurface, fontWeight: 500,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {label}
+          </span>
+        </div>
+        <MIcon name={error ? 'close' : 'list'} size={22} color={scheme.onSurfaceVariant} />
+      </button>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Distance formatter — accepts the contract's number `distanceMiles`
+// ────────────────────────────────────────────────────────────────────────
+function formatDistance(miles) {
+  if (miles == null || isNaN(miles)) return '';
+  if (miles < 0.1) return '< 0.1 mi';
+  if (miles < 10) return `${miles.toFixed(1)} mi`;
+  return `${Math.round(miles)} mi`;
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Store list overlay
+// ────────────────────────────────────────────────────────────────────────
+function StoreList({ stores, scheme, onClose, onPick }) {
+  const [closing, setClosing] = React.useState(false);
+  const beginClose = React.useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 200);
+  }, [closing, onClose]);
+  const beginPick = (id) => {
+    setClosing(true);
+    setTimeout(() => onPick(id), 200);
+  };
+
+  const sorted = [...stores].sort((a, b) => {
+    const aHot = a.currentStatus === 'on';
+    const bHot = b.currentStatus === 'on';
+    if (aHot !== bHot) return aHot ? -1 : 1;
+    return (a.distanceMiles ?? 99) - (b.distanceMiles ?? 99);
+  });
+  const hotN = stores.filter(s => s.currentStatus === 'on').length;
+
+  return (
+    <div
+      className="app-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Nearby stores"
+      style={{
+        background: scheme.surface,
+        animation: closing
+          ? 'overlay-fade-out 200ms ease-in forwards'
+          : 'sheet-rise 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.05)',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{
+        padding: 'calc(env(safe-area-inset-top, 0px) + 16px) 8px 8px',
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        <button
+          onClick={beginClose} aria-label="Back"
+          style={{
+            width: 48, height: 48, borderRadius: '50%',
+            border: 'none', background: 'transparent',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <MIcon name="arrow_back" size={24} color={scheme.onSurface} />
+        </button>
+        <div style={{
+          fontSize: 22, fontWeight: 500, color: scheme.onSurface, letterSpacing: 0,
+        }}>
+          Nearby
+        </div>
+      </div>
+
+      <div style={{ padding: '4px 24px 16px' }}>
+        <div style={{ fontSize: 14, color: scheme.onSurfaceVariant }}>
+          {hotN} hot · {stores.length} stores
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '0 12px 24px' }}>
+        {sorted.map((s) => {
+          const hot = s.currentStatus === 'on';
+          const since = window.relativeTime(s.lastFlippedAt);
+          return (
+            <button
+              key={s.id}
+              onClick={() => beginPick(s.id)}
+              style={{
+                width: '100%',
+                display: 'flex', alignItems: 'center', gap: 16,
+                background: 'transparent', border: 'none',
+                padding: '12px 12px',
+                cursor: 'pointer', textAlign: 'left',
+                borderRadius: 12,
+                fontFamily: 'inherit',
+              }}
+            >
+              <div style={{
+                width: 40, height: 40, borderRadius: '50%',
+                flexShrink: 0,
+                background: hot ? scheme.primary : scheme.secondaryContainer,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <MIcon
+                  name={hot ? 'local_fire_department' : 'donut_small'}
+                  size={20}
+                  color={hot ? scheme.onPrimary : scheme.onSecondaryContainer}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 16, fontWeight: 500, color: scheme.onSurface,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {window.shortName(s.name)}
+                </div>
+                <div style={{
+                  fontSize: 13, color: hot ? scheme.primary : scheme.onSurfaceVariant,
+                  marginTop: 2, fontWeight: hot ? 500 : 400,
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {hot
+                    ? (since ? `Hot since ${since}` : 'Hot now')
+                    : (s.currentStatus === 'unknown' ? 'Status unknown' : 'Hot light off')}
+                  {' · '}{formatDistance(s.distanceMiles)}
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Hour strip — 24 UptimeBuckets, current hour highlighted
+// ────────────────────────────────────────────────────────────────────────
+function HourStrip({ buckets, scheme }) {
+  if (!buckets || buckets.length === 0) {
+    return <div style={{ height: 28, color: scheme.onSurfaceVariant, fontSize: 13 }}>No data</div>;
+  }
+  const now = new Date();
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', gap: 2, height: 28, width: '100%', alignItems: 'flex-end' }}>
+        {buckets.map((b, i) => {
+          const frac = b.fractionOn ?? 0;
+          const observedRatio = b.totalSeconds > 0 ? (b.observedSeconds / b.totalSeconds) : 1;
+          const isCurrent = new Date(b.startUtc) <= now && now < new Date(b.endUtc);
+          const height = frac > 0 ? Math.max(8, 8 + frac * 20) : 6;
+          const bg = observedRatio < 0.25
+            ? scheme.outlineVariant
+            : (frac > 0.5 ? scheme.primary : (frac > 0 ? scheme.primary + '99' : scheme.surfaceContainerHigh));
+          return (
+            <div key={i} style={{
+              flex: 1,
+              height,
+              borderRadius: 3,
+              background: bg,
+              outline: isCurrent ? `2px solid ${scheme.onSurface}` : 'none',
+              outlineOffset: 1,
+              transition: 'height 200ms',
+            }} />
+          );
+        })}
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', marginTop: 8,
+        fontSize: 11, color: scheme.onSurfaceVariant,
+      }}>
+        <span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Uptime chart — 90 daily UptimeBuckets, hover scrubs
+// ────────────────────────────────────────────────────────────────────────
+function UptimeChart({ buckets, scheme }) {
+  const [hover, setHover] = React.useState(null);
+  const trackRef = React.useRef(null);
+
+  // Touch / pointer support — phones don't fire mouseenter, so we map
+  // the touch X coordinate into a bar index against the chart's width.
+  const indexFromClientX = React.useCallback((clientX) => {
+    const el = trackRef.current;
+    if (!el || !buckets || buckets.length === 0) return null;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    return Math.min(buckets.length - 1, Math.floor((x / rect.width) * buckets.length));
+  }, [buckets]);
+
+  const onPointerMove = React.useCallback((e) => {
+    setHover(indexFromClientX(e.clientX));
+  }, [indexFromClientX]);
+
+  const onPointerLeave = React.useCallback(() => setHover(null), []);
+
+  if (!buckets || buckets.length === 0) {
+    return <div style={{ height: 38, color: scheme.onSurfaceVariant, fontSize: 13 }}>No data</div>;
+  }
+  return (
+    <div style={{ width: '100%' }}>
+      <div
+        ref={trackRef}
+        style={{
+          display: 'flex', alignItems: 'flex-end', gap: 1.5, height: 38, width: '100%',
+          touchAction: 'pan-y',   // let the page still scroll vertically
+        }}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerMove}
+        onPointerLeave={onPointerLeave}
+        onPointerCancel={onPointerLeave}
+      >
+        {buckets.map((b, i) => {
+          const ratio = b.fractionOn ?? 0;
+          const observedRatio = b.totalSeconds > 0 ? (b.observedSeconds / b.totalSeconds) : 1;
+          let bg;
+          if (observedRatio < 0.25) bg = scheme.outlineVariant;
+          else if (ratio === 0) bg = scheme.surfaceContainerHigh;
+          else if (ratio < 0.1) bg = scheme.primaryContainer;
+          else if (ratio < 0.25) bg = scheme.primary + '99';
+          else bg = scheme.primary;
+          const h = ratio === 0 ? 6 : 12 + ratio * 26;
+          return (
+            <div key={i}
+              style={{
+                flex: 1, minWidth: 0, height: h, background: bg,
+                borderRadius: 2,
+                pointerEvents: 'none',  // pointer events go to the track, not the bars
+                opacity: hover !== null && hover !== i ? 0.45 : 1,
+                transition: 'opacity 160ms',
+              }}
+            />
+          );
+        })}
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', marginTop: 8,
+        fontSize: 11, color: scheme.onSurfaceVariant,
+      }}>
+        <span>{buckets.length} days ago</span>
+        <span>
+          {hover !== null
+            ? `Day ${hover + 1} · ${Math.round((buckets[hover].fractionOn ?? 0) * 24)} hot hrs`
+            : 'Today'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Bottom Sheet — fetches uptime when opened, switches by tab
+// ────────────────────────────────────────────────────────────────────────
+function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
+  const [tab, setTab] = React.useState('today');
+  const [hourly, setHourly] = React.useState(null);
+  const [daily, setDaily] = React.useState(null);
+
+  // ── swipe-to-dismiss + exit animation ────────────────────────────────
+  const [closing, setClosing] = React.useState(false);
+  const [dragY, setDragY] = React.useState(0);
+  const dragStartRef = React.useRef(null);
+
+  // Threshold past which a drag releases as a dismiss. ~80px feels right
+  // on phone-sized sheets — far enough to be intentional, near enough to
+  // not require a full-screen swipe.
+  const DISMISS_PX = 80;
+
+  const beginClose = React.useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    // Match the sheet-fall keyframe duration in the stylesheet.
+    setTimeout(onClose, 220);
+  }, [closing, onClose]);
+
+  const onHandlePointerDown = (e) => {
+    if (closing) return;
+    dragStartRef.current = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onHandlePointerMove = (e) => {
+    if (dragStartRef.current == null) return;
+    setDragY(Math.max(0, e.clientY - dragStartRef.current));
+  };
+  const onHandlePointerUp = (e) => {
+    if (dragStartRef.current == null) return;
+    const dy = Math.max(0, e.clientY - dragStartRef.current);
+    dragStartRef.current = null;
+    if (dy > DISMISS_PX) beginClose();
+    else setDragY(0);
+  };
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setHourly(null); setDaily(null);
+    fetchUptimeBuckets(store.id, 'hour').then(b => { if (!cancelled) setHourly(b); });
+    fetchUptimeBuckets(store.id, 'day').then(b => { if (!cancelled) setDaily(b); });
+    return () => { cancelled = true; };
+  }, [store.id, fetchUptimeBuckets]);
+
+  const hot = store.currentStatus === 'on';
+  const unknown = store.currentStatus === 'unknown';
+  const since = window.relativeTime(store.lastFlippedAt);
+
+  // Combine entrance, drag-follow, and exit. Closing wins over dragY so
+  // releasing past threshold animates cleanly to off-screen.
+  const sheetStyle = closing
+    ? { animation: 'sheet-fall 220ms cubic-bezier(0.4, 0, 1, 1) forwards' }
+    : (dragY > 0
+        ? { transform: `translateY(${dragY}px)` }
+        : { animation: 'sheet-rise 0.36s cubic-bezier(0.2, 0.9, 0.3, 1.05)' });
+
+  return (
+    <div
+      className="app-bottom-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${window.shortName(store.name)} details`}
+      style={{
+        background: scheme.surfaceContainerLow, color: scheme.onSurface,
+        boxShadow: '0 -1px 3px rgba(0,0,0,0.06), 0 -8px 28px rgba(0,0,0,0.08)',
+        transition: dragY === 0 && !closing ? 'transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1.05)' : 'none',
+        ...sheetStyle,
+      }}
+    >
+      {/* Drag affordance — gets the pointer events so finger swipes
+          dismiss the sheet. The `touch-action: none` prevents the
+          browser from interpreting the drag as a page scroll. */}
+      <div
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerUp}
+        style={{
+          display: 'flex', justifyContent: 'center', padding: '12px 0 4px',
+          cursor: 'grab', touchAction: 'none',
+        }}
+        aria-label="Drag down to dismiss"
+        role="separator"
+      >
+        <div style={{ width: 32, height: 4, borderRadius: 2, background: scheme.outlineVariant }} />
+      </div>
+
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', gap: 12,
+        padding: '12px 24px 12px',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 22, fontWeight: 500, color: scheme.onSurface, letterSpacing: 0,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {window.shortName(store.name)}
+          </div>
+          <div style={{
+            fontSize: 14, color: scheme.onSurfaceVariant, marginTop: 4,
+            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+          }}>
+            <span>{formatDistance(store.distanceMiles)}</span>
+            {store.address && (
+              <>
+                <span style={{ color: scheme.outlineVariant }}>·</span>
+                <span style={{
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  maxWidth: 240,
+                }}>{store.address}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={beginClose} aria-label="Close"
+          style={{
+            width: 40, height: 40, borderRadius: '50%',
+            border: 'none', background: 'transparent',
+            cursor: 'pointer', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+          }}
+        >
+          <MIcon name="close" size={20} color={scheme.onSurfaceVariant} />
+        </button>
+      </div>
+
+      {hot ? (
+        <div style={{
+          margin: '0 24px 16px', padding: '12px 16px',
+          background: scheme.primaryContainer, color: scheme.onPrimaryContainer,
+          borderRadius: 16,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span
+            className="kk-glow-dot"
+            style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: scheme.primary,
+              animation: 'dial-glow 2.6s ease-in-out infinite',
+              boxShadow: `0 0 0 4px ${scheme.primary}33`,
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>Hot Light On</div>
+            {since && (
+              <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                Glazing since {since}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          margin: '0 24px 16px', padding: '12px 16px',
+          background: scheme.surfaceContainerHigh, color: scheme.onSurfaceVariant,
+          borderRadius: 16,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <MIcon name="schedule" size={18} color={scheme.onSurfaceVariant} />
+          <div style={{ fontSize: 14 }}>
+            {unknown ? 'Status unknown' : (since ? `Hot light off · last flipped ${since}` : 'Hot light off')}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, padding: '0 16px 18px' }}>
+        <button style={{
+          flex: 1, height: 48, borderRadius: 24, border: 'none',
+          background: scheme.primary, color: scheme.onPrimary,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          fontSize: 14, fontWeight: 500, fontFamily: 'inherit',
+        }}
+          onClick={() => {
+            const url = `https://www.google.com/maps/dir/?api=1&destination=${store.latitude},${store.longitude}`;
+            window.open(url, '_blank', 'noopener');
+          }}>
+          <MIcon name="directions" size={18} color={scheme.onPrimary} />
+          Directions
+        </button>
+        <button aria-label="Notify when hot" style={{
+          width: 48, height: 48, borderRadius: 24, border: 'none',
+          background: scheme.secondaryContainer, color: scheme.onSecondaryContainer,
+          cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <MIcon name="notifications_active" size={20} color={scheme.onSecondaryContainer} />
+        </button>
+        <button aria-label="Share" style={{
+          width: 48, height: 48, borderRadius: 24,
+          border: `1px solid ${scheme.outline}`, background: 'transparent',
+          color: scheme.onSurface, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <MIcon name="ios_share" size={20} color={scheme.onSurface} />
+        </button>
+      </div>
+
+      <div style={{ height: 1, background: scheme.outlineVariant, margin: '0 24px' }} />
+
+      <div style={{ padding: '16px 24px 4px' }}>
+        <div style={{
+          fontSize: 11, fontWeight: 600, color: scheme.onSurfaceVariant,
+          letterSpacing: 0.5, textTransform: 'uppercase',
+          marginBottom: 12,
+        }}>
+          Hot light history
+        </div>
+
+        <div style={{
+          display: 'inline-flex',
+          border: `1px solid ${scheme.outline}`, borderRadius: 9999,
+          marginBottom: 16, overflow: 'hidden',
+        }}>
+          {[
+            { id: 'today', label: 'Today' },
+            { id: 'history', label: '90 days' },
+          ].map((t, i) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                style={{
+                  border: 'none',
+                  borderLeft: i > 0 ? `1px solid ${scheme.outline}` : 'none',
+                  background: active ? scheme.secondaryContainer : 'transparent',
+                  color: active ? scheme.onSecondaryContainer : scheme.onSurface,
+                  padding: '8px 18px',
+                  fontSize: 14, fontWeight: 500,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                {active && <MIcon name="check" size={16} color={scheme.onSecondaryContainer} />}
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{ minHeight: 60, marginBottom: 12 }}>
+          {tab === 'today'
+            ? <HourStrip buckets={hourly} scheme={scheme} />
+            : <UptimeChart buckets={daily} scheme={scheme} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, {
+  TopAppBar, BottomSheet, StoreList, UptimeChart, HourStrip,
+});
