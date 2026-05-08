@@ -257,13 +257,36 @@
         );
       }, []);
 
-      // ── Best-effort auto-locate on mount. iOS Safari will silently
-      //    fail without a user gesture; passing interactive=false
-      //    here means that failure leaves locateState='idle' so the
-      //    visible "Use my location" button stays enabled.
+      // ── Best-effort auto-locate on mount. iOS Safari does more than
+      //    silently fail gesture-less getCurrentPosition calls — the
+      //    request can stay pending indefinitely (the `timeout` option
+      //    is effectively ignored without a gesture), and a subsequent
+      //    gesture-driven call from the locate button gets interfered
+      //    with so neither callback fires and the button stays stuck
+      //    in 'locating' (greyed out). To avoid that, we only fire the
+      //    gesture-less call when the Permissions API tells us
+      //    geolocation is already 'granted'. Otherwise we skip and
+      //    wait for the user to tap the button, which preserves a
+      //    clean gesture for iOS Safari's prompt.
       React.useEffect(() => {
         if (SHARED) { setLocating(false); return; }
-        locateMe(false);
+        if (!navigator.geolocation) { setLocating(false); return; }
+        if (!navigator.permissions || !navigator.permissions.query) {
+          setLocating(false);
+          return;
+        }
+        let cancelled = false;
+        navigator.permissions.query({ name: 'geolocation' })
+          .then((status) => {
+            if (cancelled) return;
+            if (status.state === 'granted') {
+              locateMe(false);
+            } else {
+              setLocating(false);
+            }
+          })
+          .catch(() => { if (!cancelled) setLocating(false); });
+        return () => { cancelled = true; };
       }, [locateMe]);
 
       // ── /stores/nearby fetcher. Pulled out so both the initial-load
