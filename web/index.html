@@ -222,6 +222,46 @@
       const [error, setError] = React.useState(null);
       const [selected, setSelected] = React.useState(SHARED ? SHARED.id : null);
       const [listOpen, setListOpen] = React.useState(false);
+      // The set of store IDs this browser is *already* subscribed to.
+      // BottomSheet reads this on mount to start in 'subscribed' state
+      // instead of 'idle' when the user has previously enabled push for
+      // that store. Updated by subscribe/unsubscribe operations.
+      const [subscribedStoreIds, setSubscribedStoreIds] =
+        React.useState(() => new Set());
+      // ── On mount: ask the server which stores this browser is
+      //    already subscribed to and seed the set so BottomSheets
+      //    open in the right state.
+      React.useEffect(() => {
+        let cancelled = false;
+        (async () => {
+          try {
+            const ids = await window.KREMEING_API.listSubscribedStores();
+            if (!cancelled) setSubscribedStoreIds(new Set(ids));
+          } catch (_e) {
+            // 503 push_disabled / unsupported — start empty, that's fine.
+          }
+        })();
+        return () => { cancelled = true; };
+      }, []);
+
+      const onSubscribed = React.useCallback((storeId) => {
+        setSubscribedStoreIds(prev => {
+          if (prev.has(storeId)) return prev;
+          const next = new Set(prev);
+          next.add(storeId);
+          return next;
+        });
+      }, []);
+
+      const onUnsubscribed = React.useCallback((storeId) => {
+        setSubscribedStoreIds(prev => {
+          if (!prev.has(storeId)) return prev;
+          const next = new Set(prev);
+          next.delete(storeId);
+          return next;
+        });
+      }, []);
+
       // Locate-button state: 'idle' | 'locating' | 'located' | 'denied'.
       // SHARED links bypass geolocation entirely (we want the sender's
       // view, not the recipient's) so we start in 'idle' there too.
@@ -444,6 +484,9 @@
               scheme={scheme}
               onClose={() => setSelected(null)}
               fetchUptimeBuckets={fetchUptimeBuckets}
+              initiallySubscribed={subscribedStoreIds.has(selectedStore.id)}
+              onSubscribed={onSubscribed}
+              onUnsubscribed={onUnsubscribed}
             />
           )}
 

@@ -44,6 +44,7 @@ module Composition =
     let private toPushHandlerDeps (feat: PushFeature) : HttpHandlers.PushDeps = {
         Subscribe = feat.Subscriptions.Subscribe
         Unsubscribe = feat.Subscriptions.Unsubscribe
+        FindStoresByEndpoint = feat.Subscriptions.FindStoresByEndpoint
         VapidPublicKey = feat.Vapid.PublicKey
     }
 

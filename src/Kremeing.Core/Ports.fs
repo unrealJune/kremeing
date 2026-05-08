@@ -56,3 +56,10 @@ module Ports =
     /// stores; returns the count for logging.
     type DeletePushSubscriptionsByEndpoint =
         string -> Async<Result<int, StoreError>>
+
+    /// Read-side: which stores has *this* browser (identified by its
+    /// push endpoint) subscribed to? Used by the web client on app
+    /// load to restore the bell's per-store state instead of always
+    /// starting in 'idle'.
+    type FindSubscribedStoresByEndpoint =
+        string -> Async<Result<StoreId list, StoreError>>

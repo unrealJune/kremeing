@@ -133,6 +133,23 @@ async function subscribeStore(storeId) {
   return await res.json();
 }
 
+// Returns the array of storeIds this browser is currently subscribed
+// to (may be empty if there's no pushManager subscription yet, or if
+// the server has never seen one of ours). Errors propagate; callers
+// usually want to swallow them and start with an empty set.
+async function listSubscribedStores() {
+  if (!pushSupported()) return [];
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (!sub) return [];
+  const url = `${API_BASE}/subscriptions?endpoint=${encodeURIComponent(sub.endpoint)}`;
+  const res = await fetch(url);
+  if (res.status === 503) throw new Error(PUSH_DISABLED);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  return Array.isArray(body.storeIds) ? body.storeIds : [];
+}
+
 async function unsubscribeStore(storeId) {
   if (!pushSupported()) return;
   const reg = await navigator.serviceWorker.ready;
@@ -241,7 +258,7 @@ Object.assign(window, {
   KREMEING_API: {
     fetchNearbyStores, searchStores, fetchUptime, fetchHotLight,
     getVapidPublicKey, subscribeStore, unsubscribeStore,
-    pushSupported,
+    listSubscribedStores, pushSupported,
     PUSH_DISABLED, PUSH_UNSUPPORTED,
   },
   KREMEING_USE_MOCKS: USE_MOCKS,

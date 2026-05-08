@@ -465,6 +465,7 @@ module HttpHandlers =
     type PushDeps = {
         Subscribe: Ports.SubscribePush
         Unsubscribe: Ports.UnsubscribePush
+        FindStoresByEndpoint: Ports.FindSubscribedStoresByEndpoint
         VapidPublicKey: string
     }
 
@@ -512,6 +513,33 @@ module HttpHandlers =
                             let response : SubscribeResponseDto =
                                 { id = id; storeId = body.storeId }
                             return! json response next ctx
+            }
+
+    let getSubscriptionsByEndpoint (push: PushDeps option) : HttpHandler =
+        fun next ctx ->
+            task {
+                match push with
+                | None -> return! writePushDisabled next ctx
+                | Some p ->
+                    let endpointOpt = ctx.TryGetQueryStringValue "endpoint"
+                    match endpointOpt with
+                    | None | Some "" ->
+                        return! writeBadRequest "missing_query_param"
+                                    "endpoint query parameter is required"
+                                    next ctx
+                    | Some endpoint ->
+                        let! result = p.FindStoresByEndpoint endpoint
+                        match result with
+                        | Error err -> return! writeError err next ctx
+                        | Ok ids ->
+                            let dto : SubscribedStoresResponseDto = {
+                                endpoint = endpoint
+                                storeIds =
+                                    ids
+                                    |> List.map (fun (StoreId i) -> i)
+                                    |> List.toArray
+                            }
+                            return! json dto next ctx
             }
 
     let deleteSubscription (push: PushDeps option) : HttpHandler =
@@ -584,6 +612,7 @@ module HttpHandlers =
             GET >=> routef "/stores/%s/uptime"
                         (getUptime deps.History deps.Status deps.Now)
             GET    >=> route "/vapid-public-key" >=> getVapidPublicKey deps.Push
+            GET    >=> route "/subscriptions"    >=> getSubscriptionsByEndpoint deps.Push
             POST   >=> route "/subscriptions"    >=> postSubscription deps.Push
             DELETE >=> route "/subscriptions"    >=> deleteSubscription deps.Push
             setStatusCode 404

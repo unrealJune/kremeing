@@ -421,14 +421,23 @@ function UptimeChart({ buckets, scheme }) {
 // ────────────────────────────────────────────────────────────────────────
 // Bottom Sheet — fetches uptime when opened, switches by tab
 // ────────────────────────────────────────────────────────────────────────
-function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
+function BottomSheet({
+  store, onClose, scheme, fetchUptimeBuckets,
+  initiallySubscribed = false,
+  onSubscribed, onUnsubscribed,
+}) {
   const [tab, setTab] = React.useState('today');
   const [hourly, setHourly] = React.useState(null);
   const [daily, setDaily] = React.useState(null);
 
   // ── share + notify ───────────────────────────────────────────────────
   const [shareToast, setShareToast] = React.useState(null);   // 'copied' | 'error' | null
-  const [notifyState, setNotifyState] = React.useState('idle'); // 'idle' | 'subscribed' | 'denied' | 'unsupported'
+  // 'idle' | 'subscribed' | 'subscribed-polling' | 'denied' | 'unsupported' | 'ios-pwa-needed'
+  // When the App tells us we already subscribed to this store on a
+  // previous session, start as 'subscribed' so the bell shows the
+  // right state without a redundant click.
+  const [notifyState, setNotifyState] = React.useState(
+    initiallySubscribed ? 'subscribed' : 'idle');
   const pollIntervalRef = React.useRef(null);
   const lastSeenStatusRef = React.useRef(store.currentStatus);
 
@@ -568,6 +577,7 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
       try {
         if (notifyState === 'subscribed') {
           await window.KREMEING_API.unsubscribeStore(store.id);
+          onUnsubscribed?.(store.id);
         }
       } catch (_e) { /* leave UI optimistic; server may have purged it already */ }
       setNotifyState('idle');
@@ -601,6 +611,7 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
       try {
         await window.KREMEING_API.subscribeStore(store.id);
         setNotifyState('subscribed');
+        onSubscribed?.(store.id);
         return;
       } catch (err) {
         const msg = err && err.message;

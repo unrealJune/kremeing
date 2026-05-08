@@ -37,10 +37,16 @@ let private jsonContent (value: obj) : HttpContent =
 let private makePushDeps () =
     let mutable subscribed : ResizeArray<int * PushSubscription> = ResizeArray()
     let mutable unsubscribed : ResizeArray<int * string> = ResizeArray()
+    let mutable storesByEndpoint : Map<string, int list> = Map.empty
     let subscribe : Ports.SubscribePush =
         fun (StoreId sid, sub) ->
             async {
                 subscribed.Add (sid, sub)
+                let existing =
+                    Map.tryFind sub.Endpoint storesByEndpoint
+                    |> Option.defaultValue []
+                if not (List.contains sid existing) then
+                    storesByEndpoint <- Map.add sub.Endpoint (sid :: existing) storesByEndpoint
                 return Ok (PushSubscriptionId (int64 (subscribed.Count + 1000)))
             }
     let unsubscribe : Ports.UnsubscribePush =
@@ -49,9 +55,19 @@ let private makePushDeps () =
                 unsubscribed.Add (sid, endpoint)
                 return Ok ()
             }
+    let findStores : Ports.FindSubscribedStoresByEndpoint =
+        fun endpoint ->
+            async {
+                let ids =
+                    Map.tryFind endpoint storesByEndpoint
+                    |> Option.defaultValue []
+                    |> List.map StoreId
+                return Ok ids
+            }
     let deps : HttpHandlers.PushDeps = {
         Subscribe = subscribe
         Unsubscribe = unsubscribe
+        FindStoresByEndpoint = findStores
         VapidPublicKey = "BTestVapidPublicKey_AAA"
     }
     deps, subscribed, unsubscribed
@@ -174,6 +190,55 @@ let ``DELETE /subscriptions returns 204 and forwards to the port`` () =
     let (sid, endpoint) = unsubscribed.[0]
     sid |> should equal 899
     endpoint |> should equal "https://fcm.googleapis.com/fcm/send/abc"
+
+[<Fact>]
+let ``GET /subscriptions?endpoint=... lists store ids this browser is subscribed to`` () =
+    let push, _, _ = makePushDeps ()
+    let deps = { (TestHost.Stubs.deps()) with Push = Some push }
+    use client = TestHost.start deps
+
+    // Subscribe one browser endpoint to two stores.
+    let endpoint = "https://fcm.googleapis.com/fcm/send/abc"
+    let post sid =
+        let body = jsonContent {|
+            storeId = sid
+            subscription = {| endpoint = endpoint
+                              keys = {| p256dh = "p"; auth = "a" |} |}
+        |}
+        client.PostAsync("/subscriptions", body).Result
+    let _ = post 899
+    let _ = post 898
+
+    let r = client.GetAsync(
+        sprintf "/subscriptions?endpoint=%s" (Uri.EscapeDataString endpoint)).Result
+    r.StatusCode |> should equal HttpStatusCode.OK
+    let body = parse<SubscribedStoresResponseDto> r
+    body.endpoint |> should equal endpoint
+    Set.ofArray body.storeIds |> should equal (Set.ofList [898; 899])
+
+[<Fact>]
+let ``GET /subscriptions returns an empty array for unknown endpoints`` () =
+    let push, _, _ = makePushDeps ()
+    let deps = { (TestHost.Stubs.deps()) with Push = Some push }
+    use client = TestHost.start deps
+    let r = client.GetAsync("/subscriptions?endpoint=https%3A%2F%2Fnope").Result
+    r.StatusCode |> should equal HttpStatusCode.OK
+    let body = parse<SubscribedStoresResponseDto> r
+    body.storeIds |> should equal ([||] : int[])
+
+[<Fact>]
+let ``GET /subscriptions without endpoint returns 400`` () =
+    let push, _, _ = makePushDeps ()
+    let deps = { (TestHost.Stubs.deps()) with Push = Some push }
+    use client = TestHost.start deps
+    let r = client.GetAsync("/subscriptions").Result
+    r.StatusCode |> should equal HttpStatusCode.BadRequest
+
+[<Fact>]
+let ``GET /subscriptions returns 503 when push is disabled`` () =
+    use client = TestHost.start (TestHost.Stubs.deps())
+    let r = client.GetAsync("/subscriptions?endpoint=https%3A%2F%2Fx").Result
+    r.StatusCode |> should equal (enum<HttpStatusCode> 503)
 
 [<Fact>]
 let ``DELETE /subscriptions rejects missing endpoint`` () =

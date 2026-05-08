@@ -217,6 +217,36 @@ paths:
           $ref: '#/components/responses/PushDisabled'
 
   /subscriptions:
+    get:
+      tags: [push]
+      summary: Stores this browser is currently subscribed to
+      description: |
+        Pass the browser's `pushManager.getSubscription().endpoint`. The
+        server returns every storeId this endpoint has an active row
+        for. Used by the web client on app load to restore per-store
+        bell state.
+      parameters:
+        - in: query
+          name: endpoint
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '200':
+          description: Array of storeIds (possibly empty).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [endpoint, storeIds]
+                properties:
+                  endpoint: { type: string, format: uri }
+                  storeIds:
+                    type: array
+                    items: { type: integer }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/PushDisabled'
     post:
       tags: [push]
       summary: Subscribe a browser push endpoint to a store's hot-light flips

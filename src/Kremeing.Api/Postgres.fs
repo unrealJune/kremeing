@@ -401,5 +401,30 @@ module Postgres =
                     }
                 guard work
 
+        member _.FindStoresByEndpoint : Ports.FindSubscribedStoresByEndpoint =
+            fun endpoint ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        use cmd =
+                            new NpgsqlCommand(
+                                "SELECT store_id FROM push_subscriptions \
+                                 WHERE endpoint = @endpoint \
+                                 ORDER BY store_id",
+                                conn)
+                        addParam cmd "endpoint" endpoint
+                        use! reader = cmd.ExecuteReaderAsync()
+                        let result = ResizeArray<StoreId>()
+                        let mutable hasNext = true
+                        while hasNext do
+                            let! r = reader.ReadAsync()
+                            hasNext <- r
+                            if hasNext then
+                                result.Add (StoreId (reader.GetInt32 0))
+                        return List.ofSeq result
+                    }
+                guard work
+
     let createPushSubscriptions (connectionString: string) =
         PushSubscriptionsStore(connectionString)

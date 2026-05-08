@@ -129,6 +129,30 @@ type Tests(fx: PostgresFixture.PostgresFixture) =
         | other -> failwithf "expected Ok 0, got %A" other
 
     [<PgProbe.PgFact>]
+    member _.``FindStoresByEndpoint lists every store this endpoint subscribes to`` () =
+        let s = store ()
+        let endpoint = "https://fcm.googleapis.com/fcm/send/abc"
+        let _ = s.Subscribe (StoreId 899, sub endpoint "p1" "a1") |> runSync
+        let _ = s.Subscribe (StoreId 898, sub endpoint "p2" "a2") |> runSync
+        // Other endpoint subscribed to a third store — should NOT appear.
+        let _ = s.Subscribe (StoreId 100, sub "https://other/x" "p3" "a3") |> runSync
+
+        match s.FindStoresByEndpoint endpoint |> runSync with
+        | Ok ids ->
+            ids
+            |> List.map (fun (StoreId i) -> i)
+            |> Set.ofList
+            |> should equal (Set.ofList [898; 899])
+        | Error e -> failwithf "expected Ok, got %A" e
+
+    [<PgProbe.PgFact>]
+    member _.``FindStoresByEndpoint returns empty list for unknown endpoints`` () =
+        let s = store ()
+        match s.FindStoresByEndpoint "https://nope" |> runSync with
+        | Ok ids -> ids |> should be Empty
+        | Error e -> failwithf "expected Ok, got %A" e
+
+    [<PgProbe.PgFact>]
     member _.``FindForStore returns rows oldest-first by created_at`` () =
         // Order matters for the dispatcher — older subscriptions are
         // typically more valuable (more likely to be active long-lived

@@ -148,6 +148,15 @@ module Api =
         publicKey: string
     }
 
+    /// Response of `GET /subscriptions?endpoint=...`. Lets the web
+    /// client tell, on page load, which stores this browser is already
+    /// subscribed to — so the bell button shows the right state.
+    [<CLIMutable>]
+    type SubscribedStoresResponseDto = {
+        endpoint: string
+        storeIds: int[]
+    }
+
     module BucketSizes =
         [<Literal>]
         let Hour = "hour"
