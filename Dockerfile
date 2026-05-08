@@ -12,8 +12,10 @@ COPY src/Kremeing.Core/Kremeing.Core.fsproj            src/Kremeing.Core/
 COPY src/Kremeing.Api/Kremeing.Api.fsproj              src/Kremeing.Api/
 RUN dotnet restore src/Kremeing.Api/Kremeing.Api.fsproj
 
-# Then bring source and publish a self-contained-style output.
+# Then bring source + the web client (linked into wwwroot/ via fsproj
+# Content elements) and publish a self-contained-style output.
 COPY src/ src/
+COPY web/ web/
 RUN dotnet publish src/Kremeing.Api/Kremeing.Api.fsproj \
         -c Release \
         -o /app/publish \

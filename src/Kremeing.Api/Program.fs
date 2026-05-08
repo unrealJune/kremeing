@@ -29,8 +29,19 @@ let role () : Role =
 
 /// Wires Giraffe with a Deps bag. Exposed so test hosts can call it
 /// with their own stubs — `main` below uses production wiring.
+///
+/// Pipeline order:
+///   1. CORS — must run before any handler that could 404 a preflight.
+///   2. UseDefaultFiles → "/" rewrites to "/index.html" for static
+///      file serving.
+///   3. UseStaticFiles — serves files from wwwroot/ (the bundled web
+///      client). Static lookups happen first so /index.html, /map.jsx,
+///      /stores.js etc. don't fall into Giraffe and 404.
+///   4. Giraffe — handles every API path that didn't match a file.
 let configureApp (deps: HttpHandlers.Deps) (app: IApplicationBuilder) =
     app.UseCors() |> ignore
+    app.UseDefaultFiles() |> ignore
+    app.UseStaticFiles() |> ignore
     app.UseGiraffe(HttpHandlers.webApp deps)
 
 let configureServices (services: IServiceCollection) =

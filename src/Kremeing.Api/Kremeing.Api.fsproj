@@ -20,6 +20,17 @@
     <EmbeddedResource Include="openapi.yaml" />
   </ItemGroup>
 
+  <!-- Bundle the static web client into the build output's wwwroot/.
+       ASP.NET Core's static-file middleware picks it up automatically
+       (default WebRoot = ContentRoot/wwwroot). Keeping the source in
+       /web at the repo root preserves the layout used during dev. -->
+  <ItemGroup>
+    <Content Include="..\..\web\**\*"
+             Link="wwwroot\%(RecursiveDir)%(FileName)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Kremeing.Contracts\Kremeing.Contracts.fsproj" />
     <ProjectReference Include="..\Kremeing.Core\Kremeing.Core.fsproj" />

@@ -3,7 +3,18 @@
 // the page is opened with `?mock=1`. Otherwise an API failure surfaces as an
 // error so users don't see fake NYC stores while the API is down.
 
-const API_BASE = window.KREMEING_API_BASE || 'http://localhost:5234';
+// API_BASE resolution:
+//   1. Explicit override via `window.KREMEING_API_BASE` (cross-origin dev).
+//   2. Same-origin (empty string) when the page is served from a real
+//      domain — e.g. kremeing.junephilip.com serves this page AND the API.
+//   3. Fall back to the dev port when the page is on localhost (typical
+//      `python -m http.server` workflow against a separately-running API).
+const API_BASE =
+  window.KREMEING_API_BASE
+  ?? ((window.location.hostname === 'localhost'
+       || window.location.hostname === '127.0.0.1')
+      ? 'http://localhost:5234'
+      : '');
 
 const USE_MOCKS = new URLSearchParams(window.location.search).has('mock');
 

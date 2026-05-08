@@ -105,6 +105,7 @@ module HttpHandlers =
         setContentType "text/html; charset=utf-8"
         >=> setBodyFromString docsHtml
 
+
     // ──── /stores/{id}/hot-light ────────────────────────────────────────
 
     let getHotLight

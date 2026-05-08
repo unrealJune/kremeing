@@ -6,6 +6,22 @@ open Xunit
 open FsUnit.Xunit
 
 [<Fact>]
+let ``GET / serves the bundled web client, not a JSON 404`` () =
+    // Regression guard: bare-domain visitors should land on the map UX
+    // (web/index.html), not see {"error":"not_found"}. Static files are
+    // wired in Program.configureApp via UseDefaultFiles + UseStaticFiles,
+    // and the web/ source is linked into wwwroot/ at build time.
+    use client = TestHost.start (TestHost.Stubs.deps())
+    let response = client.GetAsync("/").Result
+    response.StatusCode |> should equal HttpStatusCode.OK
+    let ct = response.Content.Headers.ContentType.MediaType
+    ct |> should equal "text/html"
+    let body = response.Content.ReadAsStringAsync().Result
+    // Markers in web/index.html that won't churn often.
+    body |> should haveSubstring "<!DOCTYPE html>"
+    body |> should haveSubstring "Krispy Kreme"
+
+[<Fact>]
 let ``GET /openapi.yaml returns 200 with the OpenAPI 3.1 spec`` () =
     use client = TestHost.start (TestHost.Stubs.deps())
     let response = client.GetAsync("/openapi.yaml").Result
