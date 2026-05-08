@@ -64,14 +64,20 @@ module Composition =
         let searchNearby : HttpHandlers.SearchNearby =
             fun (lat, lng) -> LiveApi.searchByLocation send lat lng
 
+        let searchByQuery : HttpHandlers.SearchByQuery =
+            fun q -> LiveApi.searchByCityState send q
+
         // Read-through caches: TTLs short enough that data feels live,
         // long enough that a viral link can't translate into 100 req/sec
         // against api.krispykreme.com. Capacity is generous — keys are
-        // either shopId (ints) or quantized lat/lng tuples.
+        // either shopId (ints), quantized lat/lng tuples, or normalized
+        // query strings.
         let hotLightCache =
             Cache.Cache<int, HotLightObservation>(TimeSpan.FromSeconds 60.0, 1024)
         let nearbyCache =
             Cache.Cache<int * int * int, NearbyResponseDto>(TimeSpan.FromSeconds 30.0, 1024)
+        let searchCache =
+            Cache.Cache<string * int, SearchResponseDto>(TimeSpan.FromSeconds 30.0, 1024)
 
         // 60 req/min per IP across the proxy endpoints. Token bucket
         // means short bursts up to capacity are tolerated, sustained
@@ -82,11 +88,13 @@ module Composition =
         let handlers : HttpHandlers.Deps = {
             GetHotLightStatus = getHotLight
             SearchNearby = searchNearby
+            SearchByQuery = searchByQuery
             History = observations.History
             Status = observations.Status
             Now = now
             HotLightCache = hotLightCache
             NearbyCache = nearbyCache
+            SearchCache = searchCache
             ProxyRateLimit = proxyRateLimit
         }
 

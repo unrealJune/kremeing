@@ -59,6 +59,18 @@ module Api =
     }
 
     [<CLIMutable>]
+    type SearchQueryDto = {
+        q: string
+        limit: int
+    }
+
+    [<CLIMutable>]
+    type SearchResponseDto = {
+        query: SearchQueryDto
+        stores: NearbyStoreDto[]
+    }
+
+    [<CLIMutable>]
     type HotLightFlipDto = {
         storeId: int
         /// "on" or "off" — the status the store flipped *to*.

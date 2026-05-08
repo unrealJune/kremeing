@@ -138,6 +138,11 @@ module HttpHandlers =
     type SearchNearby =
         float * float -> Async<Result<LiveApi.KrispyShopDto list, StoreError>>
 
+    /// Free-text query — KK's API accepts a city/state ("Seattle, WA")
+    /// or a zip code ("98109"). Same cap of 12 results.
+    type SearchByQuery =
+        string -> Async<Result<LiveApi.KrispyShopDto list, StoreError>>
+
     let private nearbyStoreToDto
             (storeStatus: Ports.GetStoreStatus)
             (shop: LiveApi.KrispyShopDto)
@@ -244,16 +249,80 @@ module HttpHandlers =
                                     trimmed
                                     |> List.map (nearbyStoreToDto storeStatus)
                                     |> System.Threading.Tasks.Task.WhenAll
-                                return Ok {
+                                let response : NearbyResponseDto = {
                                     query = { latitude = la; longitude = ln; limit = limit }
                                     stores = dtos
                                 }
+                                return Ok response
                         }
                     let! result =
                         cache.GetOrAdd key n (fun _ ->
                             buildResponse () |> Async.AwaitTask)
                     match result with
                     | Ok r -> return! json r next ctx
+                    | Error err -> return! writeError err next ctx
+            }
+
+    // ──── /stores/search ────────────────────────────────────────────────
+
+    [<Literal>]
+    let MaxSearchQueryLen = 100
+
+    let getSearch
+            (searchByQuery: SearchByQuery)
+            (storeStatus: Ports.GetStoreStatus)
+            (cache: Cache.Cache<string * int, SearchResponseDto>)
+            (now: unit -> DateTimeOffset)
+            : HttpHandler =
+        fun next ctx ->
+            task {
+                let qOpt = ctx.TryGetQueryStringValue "q"
+                let limit =
+                    ctx.TryGetQueryStringValue "limit"
+                    |> Option.bind (fun s ->
+                        match Int32.TryParse s with
+                        | true, n when n > 0 -> Some n
+                        | _ -> None)
+                    |> Option.defaultValue 12
+                    |> min MaxNearbyLimit
+
+                match qOpt with
+                | None ->
+                    return! writeBadRequest "missing_query_param"
+                                "q is required (zip or 'City, ST')" next ctx
+                | Some raw when System.String.IsNullOrWhiteSpace raw ->
+                    return! writeBadRequest "missing_query_param"
+                                "q is required (zip or 'City, ST')" next ctx
+                | Some raw when raw.Length > MaxSearchQueryLen ->
+                    return! writeBadRequest "invalid_query"
+                                (sprintf "q must be ≤%d chars" MaxSearchQueryLen)
+                                next ctx
+                | Some raw ->
+                    let q = raw.Trim()
+                    // Cache key normalizes whitespace + case so
+                    // "Seattle, WA" and "seattle, wa" share an entry.
+                    let key = (q.ToLowerInvariant(), limit)
+                    let n = now()
+                    let build () =
+                        task {
+                            let! result = searchByQuery q
+                            match result with
+                            | Error err -> return Error err
+                            | Ok shops ->
+                                let trimmed = shops |> List.truncate limit
+                                let! dtos =
+                                    trimmed
+                                    |> List.map (nearbyStoreToDto storeStatus)
+                                    |> System.Threading.Tasks.Task.WhenAll
+                                let response : SearchResponseDto = {
+                                    query = { q = q; limit = limit }
+                                    stores = dtos
+                                }
+                                return Ok response
+                        }
+                    let! result = cache.GetOrAdd key n (fun _ -> build () |> Async.AwaitTask)
+                    match result with
+                    | Ok response -> return! json response next ctx
                     | Error err -> return! writeError err next ctx
             }
 
@@ -394,6 +463,7 @@ module HttpHandlers =
     type Deps = {
         GetHotLightStatus: Ports.GetHotLightStatus
         SearchNearby: SearchNearby
+        SearchByQuery: SearchByQuery
         History: Ports.GetHistory
         Status: Ports.GetStoreStatus
         Now: unit -> DateTimeOffset
@@ -402,6 +472,7 @@ module HttpHandlers =
         /// instances; production wires real ones in Composition.
         HotLightCache: Cache.Cache<int, HotLightObservation>
         NearbyCache: Cache.Cache<int * int * int, NearbyResponseDto>
+        SearchCache: Cache.Cache<string * int, SearchResponseDto>
         ProxyRateLimit: RateLimit.Limiter
     }
 
@@ -417,6 +488,9 @@ module HttpHandlers =
             GET >=> route "/stores/nearby"
                 >=> limited
                 >=> getNearby deps.SearchNearby deps.Status deps.NearbyCache deps.Now
+            GET >=> route "/stores/search"
+                >=> limited
+                >=> getSearch deps.SearchByQuery deps.Status deps.SearchCache deps.Now
             GET >=> routef "/stores/%s/hot-light"
                         (fun id ->
                             limited >=> getHotLight deps.GetHotLightStatus deps.HotLightCache deps.Now id)

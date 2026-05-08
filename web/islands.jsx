@@ -3,15 +3,22 @@
 // limited to what the contract returns (no rating, no hours, no nextHot).
 
 // ────────────────────────────────────────────────────────────────────────
-// Top search bar — also renders the locating/error states in-place so the
-// user sees what's happening without a separate banner.
+// Top search bar — text input for ZIP/"City, ST" queries plus a status
+// indicator (hot count, locating spinner, or error) below the input.
+// Tapping the list icon on the right opens the StoreList overlay.
 // ────────────────────────────────────────────────────────────────────────
-function TopAppBar({ hotCount, scheme, onOpenList, locating, error }) {
+function TopAppBar({ hotCount, scheme, onOpenList, onSearch, locating, searching, error }) {
+  const [value, setValue] = React.useState('');
+
   let dotColor, dotShadow, label;
   if (error) {
     dotColor = scheme.tertiary;
     dotShadow = `0 0 0 4px ${scheme.tertiary}1F`;
-    label = 'Offline · couldn’t reach the API';
+    label = error.toString().slice(0, 60);
+  } else if (searching) {
+    dotColor = scheme.primary;
+    dotShadow = `0 0 0 4px ${scheme.primary}1F`;
+    label = 'Searching…';
   } else if (locating) {
     dotColor = scheme.outline;
     dotShadow = 'none';
@@ -22,44 +29,85 @@ function TopAppBar({ hotCount, scheme, onOpenList, locating, error }) {
     label = `${hotCount} ${hotCount === 1 ? 'store' : 'stores'} hot now`;
   }
 
+  const submit = (e) => {
+    e.preventDefault();
+    const q = value.trim();
+    if (q.length === 0) return;
+    onSearch?.(q);
+    // Drop focus on mobile so the keyboard tucks away after submit.
+    e.currentTarget?.querySelector('input')?.blur();
+  };
+
   return (
-    <div className="app-top-bar">
-      <button
-        onClick={onOpenList}
-        disabled={Boolean(error)}
+    <div className="app-top-bar" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <form
+        onSubmit={submit}
+        role="search"
         style={{
-          width: '100%',
+          display: 'flex', alignItems: 'center',
           background: scheme.surfaceContainerHigh,
           borderRadius: 28,
           height: 56,
-          display: 'flex', alignItems: 'center',
-          padding: '0 16px',
+          padding: '0 8px 0 16px',
           gap: 12,
           boxShadow: '0 1px 2px rgba(0,0,0,0.05), 0 4px 14px rgba(0,0,0,0.06)',
-          border: 'none',
-          cursor: error ? 'default' : 'pointer', textAlign: 'left',
-          fontFamily: 'inherit',
-          opacity: error ? 0.85 : 1,
         }}
       >
         <MIcon name="search" size={22} color={scheme.onSurfaceVariant} />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: dotColor,
-            flexShrink: 0,
-            boxShadow: dotShadow,
-          }} />
-          <span style={{
-            flex: 1,
-            fontSize: 16, color: scheme.onSurface, fontWeight: 500,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        <input
+          type="search"
+          inputMode="search"
+          autoComplete="off"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Search ZIP or city (e.g. 98109)"
+          aria-label="Search by ZIP or city"
+          style={{
+            flex: 1, minWidth: 0,
+            background: 'transparent', border: 'none', outline: 'none',
+            fontSize: 16, color: scheme.onSurface, fontFamily: 'inherit',
+          }}
+        />
+        {value.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setValue('')}
+            aria-label="Clear search"
+            style={{
+              width: 32, height: 32, borderRadius: '50%',
+              border: 'none', background: 'transparent', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: scheme.onSurfaceVariant, padding: 0,
+            }}>
+            <MIcon name="close" size={18} color={scheme.onSurfaceVariant} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onOpenList}
+          aria-label="Open store list"
+          style={{
+            width: 40, height: 40, borderRadius: '50%',
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
           }}>
-            {label}
-          </span>
-        </div>
-        <MIcon name={error ? 'close' : 'list'} size={22} color={scheme.onSurfaceVariant} />
-      </button>
+          <MIcon name="list" size={22} color={scheme.onSurfaceVariant} />
+        </button>
+      </form>
+      <div style={{
+        padding: '0 16px', display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 13, color: scheme.onSurfaceVariant, lineHeight: '20px',
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: dotColor, flexShrink: 0,
+          boxShadow: dotShadow,
+        }} />
+        <span style={{
+          flex: 1,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>{label}</span>
+      </div>
     </div>
   );
 }

@@ -43,6 +43,7 @@ let ``OpenAPI spec documents every endpoint we ship`` () =
     for path in [
         "/health"
         "/stores/nearby"
+        "/stores/search"
         "/stores/{id}/hot-light"
         "/stores/{id}/history"
         "/stores/{id}/uptime"

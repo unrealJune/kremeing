@@ -5,11 +5,16 @@
 // Clicking a marker invokes `onSelect(store.id)`. The map view animates to
 // the selected store. The user's location is rendered as a separate marker.
 
-function MapView({ stores, scheme, selected, onSelect, center, userPos }) {
+function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewChange }) {
   const containerRef = React.useRef(null);
   const mapRef = React.useRef(null);
   const markersRef = React.useRef(new Map()); // id -> { marker, hot, selected }
   const userMarkerRef = React.useRef(null);
+  const onViewChangeRef = React.useRef(onViewChange);
+
+  // Keep the latest callback in a ref so the moveend listener registered
+  // once at init can call the up-to-date function without re-attaching.
+  React.useEffect(() => { onViewChangeRef.current = onViewChange; }, [onViewChange]);
 
   // ── init Leaflet map once ─────────────────────────────────────────────
   React.useEffect(() => {
@@ -36,6 +41,13 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos }) {
     ).addTo(map);
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Notify the App when the user finishes panning/zooming. The App
+    // decides whether the move was significant enough to refetch stores.
+    map.on('moveend', () => {
+      const c = map.getCenter();
+      onViewChangeRef.current?.({ lat: c.lat, lng: c.lng });
+    });
 
     mapRef.current = map;
 

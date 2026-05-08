@@ -206,10 +206,17 @@
         SHARED ? { lat: SHARED.lat, lng: SHARED.lng } : FALLBACK_CENTER);
       const [userPos, setUserPos] = React.useState(null);
       const [locating, setLocating] = React.useState(SHARED == null);
+      const [searching, setSearching] = React.useState(false);
       const [stores, setStores] = React.useState([]);
       const [error, setError] = React.useState(null);
       const [selected, setSelected] = React.useState(SHARED ? SHARED.id : null);
       const [listOpen, setListOpen] = React.useState(false);
+
+      // Tracks the center the most recent /stores/nearby fetch was
+      // anchored on, so map-pan refetches can compare and only fire
+      // for genuinely-new viewports.
+      const lastFetchCenterRef = React.useRef({ lat: center.lat, lng: center.lng });
+      const moveDebounceRef = React.useRef(null);
 
       // ── Geolocate (skipped when arriving via a share link). Bump
       //    timeout to 10s — cold GPS lock can be slow — and expose
@@ -238,7 +245,14 @@
         let cancelled = false;
         setError(null);
         window.KREMEING_API.fetchNearbyStores(center.lat, center.lng)
-          .then((s) => { if (!cancelled) { setStores(s); setError(null); } })
+          .then((s) => {
+            if (cancelled) return;
+            setStores(s);
+            setError(null);
+            // Remember the center we just fetched against so map-pan
+            // refetches can compare distances accurately.
+            lastFetchCenterRef.current = { lat: center.lat, lng: center.lng };
+          })
           .catch((err) => {
             if (cancelled) return;
             console.warn('[kremeing] /stores/nearby failed:', err.message);
@@ -251,6 +265,51 @@
           });
         return () => { cancelled = true; };
       }, [center.lat, center.lng]);
+
+      // ── Map pan/zoom: refetch nearby when the user has moved far
+      //    enough that different stores are likely to be in range.
+      //    Programmatic recenters set lastFetchCenterRef = the new
+      //    center *before* moveend fires (or set it inline when search
+      //    completes), so this branch only fires for genuine user pans.
+      const onViewChange = React.useCallback((c) => {
+        // Crude L1-degree distance: 1° lat ≈ 111 km, 1° lng (US) ≈ 80 km,
+        // so 0.05° ≈ 5 km on lat and ~4 km on lng. Tight enough to keep
+        // the map alive, loose enough to suppress jittery scroll fires.
+        const last = lastFetchCenterRef.current;
+        const moved = Math.abs(c.lat - last.lat) > 0.05
+                   || Math.abs(c.lng - last.lng) > 0.05;
+        if (!moved) return;
+        if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
+        moveDebounceRef.current = setTimeout(() => {
+          setCenter({ lat: c.lat, lng: c.lng });
+        }, 350);
+      }, []);
+
+      // ── Search by ZIP or "City, ST" via /stores/search.
+      const onSearch = React.useCallback(async (q) => {
+        setSearching(true);
+        setError(null);
+        try {
+          const results = await window.KREMEING_API.searchStores(q);
+          setStores(results);
+          if (results.length > 0) {
+            const first = results[0];
+            // Pre-stamp lastFetchCenterRef so the upcoming map pan
+            // (triggered by setCenter below) doesn't fire its own
+            // refetch — we already have the results.
+            lastFetchCenterRef.current = { lat: first.latitude, lng: first.longitude };
+            setCenter({ lat: first.latitude, lng: first.longitude });
+            setSelected(first.id);
+          } else {
+            setSelected(null);
+          }
+        } catch (err) {
+          console.warn('[kremeing] /stores/search failed:', err.message);
+          setError(`No results for "${q}"`);
+        } finally {
+          setSearching(false);
+        }
+      }, []);
 
       // ── Uptime fetch — same gating: real errors stay errors unless
       //    the page explicitly asked for mocks.
@@ -291,13 +350,16 @@
               onSelect={onSelect}
               center={center}
               userPos={userPos}
+              onViewChange={onViewChange}
             />
 
             <TopAppBar
               hotCount={hotCount}
               scheme={scheme}
               onOpenList={() => setListOpen(true)}
+              onSearch={onSearch}
               locating={locating}
+              searching={searching}
               error={error}
             />
           </div>

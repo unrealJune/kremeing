@@ -44,6 +44,9 @@ module Stubs =
     let private notUsedNearby : HttpHandlers.SearchNearby =
         fun _ -> async { return Error (UpstreamUnavailable "stub: search not configured") }
 
+    let private notUsedSearchByQuery : HttpHandlers.SearchByQuery =
+        fun _ -> async { return Error (UpstreamUnavailable "stub: search-by-query not configured") }
+
     let private notUsedHistory : Ports.GetHistory =
         fun _ -> async { return Error (UpstreamUnavailable "stub: history not configured") }
 
@@ -63,6 +66,7 @@ module Stubs =
         {
             GetHotLightStatus = alwaysFails (UpstreamUnavailable "stub: not configured")
             SearchNearby = notUsedNearby
+            SearchByQuery = notUsedSearchByQuery
             History = notUsedHistory
             Status = notUsedStatus
             Now = fun () -> epoch
@@ -71,6 +75,9 @@ module Stubs =
                     System.TimeSpan.FromMinutes 5.0, 64)
             NearbyCache =
                 Cache.Cache<int * int * int, Kremeing.Contracts.Api.NearbyResponseDto>(
+                    System.TimeSpan.FromMinutes 5.0, 64)
+            SearchCache =
+                Cache.Cache<string * int, Kremeing.Contracts.Api.SearchResponseDto>(
                     System.TimeSpan.FromMinutes 5.0, 64)
             ProxyRateLimit =
                 RateLimit.Limiter(capacity = 1_000_000.0, refillPerSecond = 1_000_000.0)

@@ -86,6 +86,42 @@ paths:
         '502':
           $ref: '#/components/responses/UpstreamUnavailable'
 
+  /stores/search:
+    get:
+      tags: [discovery]
+      summary: Find stores by zip or "City, ST"
+      description: |
+        Free-text proxy over Krispy Kreme's `/shops/search?cityStateZip=`.
+        Accepts a 5-digit ZIP (`98109`) or a `"City, ST"` (`"Seattle, WA"`)
+        — both shapes are normalized upstream.
+
+        Responses are cached for ~30s, keyed on the lowercased,
+        whitespace-trimmed query (so `"Seattle, WA"` and `"seattle, wa"`
+        share an entry). Same 60 req/min/IP token bucket as `/nearby`
+        and `/hot-light`.
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 100 }
+          example: '98109'
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 12 }
+      responses:
+        '200':
+          description: Stores matching the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+
   /stores/{id}/hot-light:
     get:
       tags: [live]
@@ -297,6 +333,22 @@ components:
           type: array
           items: { $ref: '#/components/schemas/NearbyStore' }
 
+    SearchQuery:
+      type: object
+      required: [q, limit]
+      properties:
+        q:     { type: string }
+        limit: { type: integer }
+
+    SearchResponse:
+      type: object
+      required: [query, stores]
+      properties:
+        query:  { $ref: '#/components/schemas/SearchQuery' }
+        stores:
+          type: array
+          items: { $ref: '#/components/schemas/NearbyStore' }
+
     HotLightFlip:
       type: object
       required: [storeId, status, observedAt]
@@ -362,6 +414,7 @@ components:
             - missing_query_param
             - invalid_bucket
             - invalid_coordinate
+            - invalid_query
             - invalid_range
             - range_too_wide
             - rate_limited
