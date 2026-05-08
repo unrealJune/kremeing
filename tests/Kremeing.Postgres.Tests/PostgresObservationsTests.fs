@@ -11,6 +11,7 @@ open Kremeing.Api
 // with ObservationsTests.fs is the equivalence proof — any behavior
 // that diverges between the two adapters means one of them is wrong.
 
+[<Collection("Postgres")>]
 type Tests(fx: PostgresFixture.PostgresFixture) =
 
     let store () =

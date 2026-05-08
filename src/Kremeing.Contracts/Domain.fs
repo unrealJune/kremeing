@@ -60,3 +60,23 @@ module Domain =
         /// store — i.e., when our history begins.
         FirstObservedAt: DateTimeOffset
     }
+
+    /// Cryptographic material the browser hands us when it subscribes
+    /// to push. Endpoint is the push service URL (different per
+    /// browser: FCM on Chrome, Mozilla autopush on Firefox, Apple
+    /// web-push on Safari/iOS). p256dh + auth are the per-subscription
+    /// keys we use to encrypt push payloads (RFC 8291).
+    type PushSubscription = {
+        Endpoint: string
+        P256dh: string
+        Auth: string
+    }
+
+    type PushSubscriptionId = PushSubscriptionId of int64
+
+    type StoredPushSubscription = {
+        Id: PushSubscriptionId
+        StoreId: StoreId
+        Subscription: PushSubscription
+        CreatedAt: DateTimeOffset
+    }

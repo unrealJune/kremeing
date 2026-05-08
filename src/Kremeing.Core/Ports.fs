@@ -31,3 +31,28 @@ module Ports =
 
     type GetStoreStatus =
         StoreId -> Async<Result<StoreStatus, StoreError>>
+
+    // ──── push notifications ───────────────────────────────────────────
+
+    /// Idempotent subscribe: same (storeId, endpoint) returns the same
+    /// PushSubscriptionId; the row's keys are refreshed from the
+    /// incoming payload so a browser key-rotation doesn't strand us.
+    type SubscribePush =
+        StoreId * PushSubscription -> Async<Result<PushSubscriptionId, StoreError>>
+
+    /// User-initiated unsubscribe: drops the row matching
+    /// (storeId, endpoint). Idempotent; missing rows succeed.
+    type UnsubscribePush =
+        StoreId * string -> Async<Result<unit, StoreError>>
+
+    /// Used by the poller-side dispatcher when an On-flip lands —
+    /// returns every active subscription for that store, oldest first.
+    type FindPushSubscriptionsForStore =
+        StoreId -> Async<Result<StoredPushSubscription list, StoreError>>
+
+    /// Used by the dispatcher when a delivery returns 410 Gone (the
+    /// subscription is dead — user uninstalled the PWA, cleared site
+    /// data, etc.). Removes every row with that endpoint across all
+    /// stores; returns the count for logging.
+    type DeletePushSubscriptionsByEndpoint =
+        string -> Async<Result<int, StoreError>>

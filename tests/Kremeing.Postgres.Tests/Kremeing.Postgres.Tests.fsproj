@@ -9,6 +9,7 @@
     <Compile Include="PgProbe.fs" />
     <Compile Include="PostgresFixture.fs" />
     <Compile Include="PostgresObservationsTests.fs" />
+    <Compile Include="PostgresPushSubscriptionsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

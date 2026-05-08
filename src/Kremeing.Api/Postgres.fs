@@ -36,6 +36,22 @@ module Postgres =
             first_observed_at TIMESTAMPTZ NOT NULL,
             last_flipped_at   TIMESTAMPTZ NULL
         );
+
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id          BIGSERIAL PRIMARY KEY,
+            store_id    INT NOT NULL,
+            endpoint    TEXT NOT NULL,
+            p256dh      TEXT NOT NULL,
+            auth        TEXT NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (store_id, endpoint)
+        );
+
+        CREATE INDEX IF NOT EXISTS push_subs_by_store
+            ON push_subscriptions (store_id);
+
+        CREATE INDEX IF NOT EXISTS push_subs_by_endpoint
+            ON push_subscriptions (endpoint);
     """
 
     /// Idempotent migration. Run on startup; safe to re-run.
@@ -273,3 +289,117 @@ module Postgres =
                 }
 
     let create (connectionString: string) = Store(connectionString)
+
+    /// Postgres-backed push subscription store. Same connection string
+    /// as the observations store, separate concern. UPSERT on
+    /// (store_id, endpoint) means a re-subscribing browser refreshes
+    /// its keys without creating a duplicate row.
+    type PushSubscriptionsStore(connectionString: string) =
+
+        member _.Subscribe : Ports.SubscribePush =
+            fun (storeId, sub) ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        let (StoreId sid) = storeId
+
+                        // ON CONFLICT DO UPDATE so RETURNING id always
+                        // fires (DO NOTHING doesn't return on conflict).
+                        // Refreshing the keys also handles the case where
+                        // the browser rotated its push key material.
+                        use cmd =
+                            new NpgsqlCommand(
+                                "INSERT INTO push_subscriptions \
+                                   (store_id, endpoint, p256dh, auth) \
+                                 VALUES (@id, @endpoint, @p256dh, @auth) \
+                                 ON CONFLICT (store_id, endpoint) DO UPDATE \
+                                   SET p256dh = EXCLUDED.p256dh, \
+                                       auth   = EXCLUDED.auth \
+                                 RETURNING id",
+                                conn)
+                        addParam cmd "id"       sid
+                        addParam cmd "endpoint" sub.Endpoint
+                        addParam cmd "p256dh"   sub.P256dh
+                        addParam cmd "auth"     sub.Auth
+                        let! result = cmd.ExecuteScalarAsync()
+                        let id = downcast result : int64
+                        return PushSubscriptionId id
+                    }
+                guard work
+
+        member _.Unsubscribe : Ports.UnsubscribePush =
+            fun (storeId, endpoint) ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        let (StoreId sid) = storeId
+
+                        use cmd =
+                            new NpgsqlCommand(
+                                "DELETE FROM push_subscriptions \
+                                 WHERE store_id = @id AND endpoint = @endpoint",
+                                conn)
+                        addParam cmd "id"       sid
+                        addParam cmd "endpoint" endpoint
+                        let! _ = cmd.ExecuteNonQueryAsync()
+                        return ()
+                    }
+                guard work
+
+        member _.FindForStore : Ports.FindPushSubscriptionsForStore =
+            fun storeId ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        let (StoreId sid) = storeId
+
+                        use cmd =
+                            new NpgsqlCommand(
+                                "SELECT id, endpoint, p256dh, auth, created_at \
+                                 FROM push_subscriptions \
+                                 WHERE store_id = @id \
+                                 ORDER BY created_at ASC",
+                                conn)
+                        addParam cmd "id" sid
+                        use! reader = cmd.ExecuteReaderAsync()
+                        let result = ResizeArray<StoredPushSubscription>()
+                        let mutable hasNext = true
+                        while hasNext do
+                            let! r = reader.ReadAsync()
+                            hasNext <- r
+                            if hasNext then
+                                result.Add {
+                                    Id = PushSubscriptionId (reader.GetInt64 0)
+                                    StoreId = storeId
+                                    Subscription = {
+                                        Endpoint = reader.GetString 1
+                                        P256dh   = reader.GetString 2
+                                        Auth     = reader.GetString 3
+                                    }
+                                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(4)
+                                }
+                        return List.ofSeq result
+                    }
+                guard work
+
+        member _.DeleteByEndpoint : Ports.DeletePushSubscriptionsByEndpoint =
+            fun endpoint ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        use cmd =
+                            new NpgsqlCommand(
+                                "DELETE FROM push_subscriptions WHERE endpoint = @endpoint",
+                                conn)
+                        addParam cmd "endpoint" endpoint
+                        let! affected = cmd.ExecuteNonQueryAsync()
+                        return affected
+                    }
+                guard work
+
+    let createPushSubscriptions (connectionString: string) =
+        PushSubscriptionsStore(connectionString)
