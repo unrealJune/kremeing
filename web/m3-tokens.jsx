@@ -97,6 +97,8 @@ const M3_ICONS = {
   phone: <path d="M5 4h3l2 5-2.5 1.5a11 11 0 005 5L14 13l5 2v3a2 2 0 01-2 2A14 14 0 013 6a2 2 0 012-2z" fill="currentColor"/>,
   arrow_back: <path d="M11 5l-7 7 7 7M4 12h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none"/>,
   list: <path d="M4 7h2M9 7h11M4 12h2M9 12h11M4 17h2M9 17h11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none"/>,
+  my_location: <g><circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></g>,
+  location_disabled: <g><circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none"/><path d="M5 5l14 14" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/></g>,
 };
 
 function MIcon({ name, size = 24, color = 'currentColor', style = {} }) {

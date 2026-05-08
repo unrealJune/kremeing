@@ -3,6 +3,61 @@
 // limited to what the contract returns (no rating, no hours, no nextHot).
 
 // ────────────────────────────────────────────────────────────────────────
+// Locate button — floating bottom-left. iOS Safari often silently
+// suppresses geolocation requests that aren't triggered by a user
+// gesture; this button gives users an unambiguous way to ask.
+// ────────────────────────────────────────────────────────────────────────
+function LocateButton({ scheme, state, onLocate }) {
+  const denied = state === 'denied';
+  const locating = state === 'locating';
+  const located = state === 'located';
+
+  return (
+    <button
+      onClick={onLocate}
+      disabled={locating || denied}
+      aria-label={
+        denied   ? 'Location blocked — enable in browser settings' :
+        locating ? 'Locating…' :
+        located  ? 'Recenter on my location' :
+                   'Use my location'
+      }
+      title={
+        denied   ? 'Location blocked. Enable in your browser settings, then reload.' :
+        locating ? 'Locating…' :
+        located  ? 'Recenter on my location' :
+                   'Use my location'
+      }
+      style={{
+        position: 'fixed',
+        left: 12,
+        bottom: `calc(env(safe-area-inset-bottom, 0px) + 24px)`,
+        zIndex: 1450,
+        width: 48, height: 48,
+        borderRadius: '50%', border: 'none',
+        background: denied ? scheme.surfaceContainerHigh : scheme.surface,
+        color: denied ? scheme.outline
+              : located ? scheme.primary
+              : scheme.onSurface,
+        cursor: (locating || denied) ? 'default' : 'pointer',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.10), 0 4px 14px rgba(0,0,0,0.12)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'transform 160ms, color 200ms',
+        transform: locating ? 'scale(0.94)' : 'scale(1)',
+        opacity: denied ? 0.7 : 1,
+      }}
+    >
+      <MIcon
+        name={denied ? 'location_disabled' : 'my_location'}
+        size={22}
+        color={denied ? scheme.outline : (located ? scheme.primary : scheme.onSurface)}
+        style={locating ? { animation: 'dial-glow 1.4s ease-in-out infinite' } : null}
+      />
+    </button>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────
 // Top search bar — text input for ZIP/"City, ST" queries plus a status
 // indicator (hot count, locating spinner, or error) below the input.
 // Tapping the list icon on the right opens the StoreList overlay.
@@ -753,5 +808,5 @@ function BottomSheet({ store, onClose, scheme, fetchUptimeBuckets }) {
 }
 
 Object.assign(window, {
-  TopAppBar, BottomSheet, StoreList, UptimeChart, HourStrip,
+  TopAppBar, BottomSheet, StoreList, UptimeChart, HourStrip, LocateButton,
 });

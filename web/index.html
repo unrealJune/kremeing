@@ -211,6 +211,10 @@
       const [error, setError] = React.useState(null);
       const [selected, setSelected] = React.useState(SHARED ? SHARED.id : null);
       const [listOpen, setListOpen] = React.useState(false);
+      // Locate-button state: 'idle' | 'locating' | 'located' | 'denied'.
+      // SHARED links bypass geolocation entirely (we want the sender's
+      // view, not the recipient's) so we start in 'idle' there too.
+      const [locateState, setLocateState] = React.useState('idle');
 
       // Tracks the center the most recent /stores/nearby fetch was
       // anchored on, so map-pan refetches can compare and only fire
@@ -218,25 +222,43 @@
       const lastFetchCenterRef = React.useRef({ lat: center.lat, lng: center.lng });
       const moveDebounceRef = React.useRef(null);
 
-      // ── Geolocate (skipped when arriving via a share link). Bump
-      //    timeout to 10s — cold GPS lock can be slow — and expose
-      //    the in-flight state so we don't silently jump to NYC.
-      React.useEffect(() => {
-        if (SHARED) return;
+      // Single locate handler — used both by the auto-attempt on
+      // mount and the explicit "locate me" button. iOS Safari
+      // sometimes won't show the permission prompt unless the call
+      // happens inside a user gesture; the button satisfies that.
+      const locateMe = React.useCallback(() => {
         if (!navigator.geolocation) {
+          setLocateState('denied');
           setLocating(false);
           return;
         }
+        setLocateState('locating');
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-            setCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+            const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            setUserPos(c);
+            // Stamp the ref *before* setCenter so the resulting map
+            // moveend doesn't trigger its own refetch loop.
+            lastFetchCenterRef.current = c;
+            setCenter(c);
+            setLocateState('located');
             setLocating(false);
           },
-          () => setLocating(false),
+          (err) => {
+            setLocateState(err && err.code === err.PERMISSION_DENIED ? 'denied' : 'idle');
+            setLocating(false);
+          },
           { timeout: 10_000, maximumAge: 60_000 }
         );
       }, []);
+
+      // ── Best-effort auto-locate on mount. May silently fail on
+      //    iOS Safari if it requires a user gesture; the visible
+      //    "Use my location" button is the always-works path.
+      React.useEffect(() => {
+        if (SHARED) { setLocating(false); return; }
+        locateMe();
+      }, [locateMe]);
 
       // ── Fetch nearby stores. With ?mock=1, fall back to mocks on
       //    failure; otherwise surface the error so users don't see fake
@@ -361,6 +383,12 @@
               locating={locating}
               searching={searching}
               error={error}
+            />
+
+            <LocateButton
+              scheme={scheme}
+              state={locateState}
+              onLocate={locateMe}
             />
           </div>
 
