@@ -99,13 +99,13 @@ let private discoverRegistry
 /// accepted — Npgsql normalizes them.
 let private buildObservations
         (logger: ILogger)
-        : Composition.ObservationsAdapter =
+        : Composition.ObservationsAdapter * string option =
     match Environment.GetEnvironmentVariable "KREMEING_DATABASE_URL" with
     | null | "" ->
         logger.LogWarning(
             "KREMEING_DATABASE_URL not set; using in-memory observations \
              (history will be lost on restart)")
-        Composition.inMemoryAdapter (InMemoryObservations.create())
+        Composition.inMemoryAdapter (InMemoryObservations.create()), None
     | raw ->
         let cs = Npgsql.NpgsqlConnectionStringBuilder(raw).ToString()
         let csb = Npgsql.NpgsqlConnectionStringBuilder cs
@@ -113,7 +113,49 @@ let private buildObservations
             "Using Postgres observations at {host}:{port}/{db}",
             csb.Host, csb.Port, csb.Database)
         Postgres.applySchema cs |> Async.AwaitTask |> Async.RunSynchronously
-        Composition.postgresAdapter (Postgres.create cs)
+        Composition.postgresAdapter (Postgres.create cs), Some cs
+
+/// Active pattern matching a non-null, non-blank string. Used by
+/// the push-feature config code below to keep the env-var triage
+/// readable.
+let private (|NotNullOrWhitespace|_|) (s: string) =
+    if System.String.IsNullOrWhiteSpace s then None else Some s
+
+/// Push notifications require both a Postgres connection (to store
+/// subscriptions) AND a VAPID keypair. Either one missing → push is
+/// disabled cleanly; the API endpoints return 503 push_disabled and
+/// clients fall back to in-page polling. Generate VAPID keys with
+/// `dotnet fsi scripts/generate-vapid.fsx` and set the env vars.
+let private buildPushFeature
+        (logger: ILogger)
+        (postgresCs: string option)
+        : Composition.PushFeature option =
+    let pub  = Environment.GetEnvironmentVariable "KREMEING_VAPID_PUBLIC_KEY"
+    let priv = Environment.GetEnvironmentVariable "KREMEING_VAPID_PRIVATE_KEY"
+    let subj =
+        match Environment.GetEnvironmentVariable "KREMEING_VAPID_SUBJECT" with
+        | NotNullOrWhitespace s -> s
+        | _ -> "mailto:hotlight@kremeing.invalid"
+    match postgresCs, pub, priv with
+    | Some cs, NotNullOrWhitespace pub', NotNullOrWhitespace priv' ->
+        logger.LogInformation "Push notifications enabled (Postgres + VAPID present)."
+        let vapid : PushDispatch.Vapid =
+            { Subject = subj; PublicKey = pub'; PrivateKey = priv' }
+        Some {
+            Subscriptions = Postgres.createPushSubscriptions cs
+            Vapid = vapid
+            Dispatch = PushDispatch.create vapid
+        }
+    | _ ->
+        let why =
+            match postgresCs, pub, priv with
+            | None,    _, _                 -> "Postgres not configured"
+            | _, NotNullOrWhitespace _, _   -> "KREMEING_VAPID_PRIVATE_KEY missing"
+            | _, _, _                       -> "KREMEING_VAPID_PUBLIC_KEY missing"
+        logger.LogWarning(
+            "Push notifications disabled ({reason}); /subscriptions endpoints \
+             will return 503", why)
+        None
 
 [<EntryPoint>]
 let main args =
@@ -130,9 +172,10 @@ let main args =
     let activeRole = role ()
     logger.LogInformation("Starting in role={role}", string activeRole)
 
-    let observations = buildObservations logger
+    let observations, postgresCs = buildObservations logger
+    let push = buildPushFeature logger postgresCs
     let registry = discoverRegistry logger send
-    let deps = Composition.build send registry observations
+    let deps = Composition.build send registry observations push
 
     // Poller registration is gated by role — only one deployment runs
     // it, so multiple API replicas don't multiply our upstream load.

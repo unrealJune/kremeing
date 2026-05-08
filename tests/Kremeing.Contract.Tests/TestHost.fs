@@ -81,4 +81,7 @@ module Stubs =
                     System.TimeSpan.FromMinutes 5.0, 64)
             ProxyRateLimit =
                 RateLimit.Limiter(capacity = 1_000_000.0, refillPerSecond = 1_000_000.0)
+            // Push defaults to disabled in tests — the dedicated push
+            // contract tests build their own deps with stubbed ports.
+            Push = None
         }

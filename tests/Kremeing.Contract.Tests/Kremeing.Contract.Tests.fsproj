@@ -15,6 +15,7 @@
     <Compile Include="CorsContractTests.fs" />
     <Compile Include="SecurityContractTests.fs" />
     <Compile Include="SearchContractTests.fs" />
+    <Compile Include="PushSubscriptionsContractTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

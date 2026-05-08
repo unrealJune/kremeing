@@ -456,6 +456,87 @@ module HttpHandlers =
                                 return! json response next ctx
             }
 
+    // ──── push subscriptions ────────────────────────────────────────────
+
+    /// Subset of Deps that the three push endpoints need. When
+    /// `Deps.Push = None` (no Postgres + VAPID configured), every push
+    /// endpoint short-circuits with 503 push_disabled — the web client
+    /// then falls back to in-page polling.
+    type PushDeps = {
+        Subscribe: Ports.SubscribePush
+        Unsubscribe: Ports.UnsubscribePush
+        VapidPublicKey: string
+    }
+
+    let private writePushDisabled : HttpHandler =
+        setStatusCode 503
+        >=> json
+            { error = ErrorCodes.PushDisabled
+              message = "Push notifications are not configured on this server." }
+
+    let getVapidPublicKey (push: PushDeps option) : HttpHandler =
+        match push with
+        | None -> writePushDisabled
+        | Some p ->
+            json ({ publicKey = p.VapidPublicKey } : VapidPublicKeyResponseDto)
+
+    let postSubscription (push: PushDeps option) : HttpHandler =
+        fun next ctx ->
+            task {
+                match push with
+                | None -> return! writePushDisabled next ctx
+                | Some p ->
+                    let! body = ctx.BindJsonAsync<SubscribeRequestDto>()
+                    let bad = isNull (box body)
+                              || isNull (box body.subscription)
+                              || isNull (box body.subscription.keys)
+                              || System.String.IsNullOrWhiteSpace body.subscription.endpoint
+                              || System.String.IsNullOrWhiteSpace body.subscription.keys.p256dh
+                              || System.String.IsNullOrWhiteSpace body.subscription.keys.auth
+                              || body.storeId <= 0
+                    if bad then
+                        return! writeBadRequest ErrorCodes.InvalidSubscription
+                                    "subscription.endpoint, keys.p256dh, keys.auth, and a positive storeId are required"
+                                    next ctx
+                    else
+                        let domainSub = {
+                            Endpoint = body.subscription.endpoint
+                            P256dh = body.subscription.keys.p256dh
+                            Auth = body.subscription.keys.auth
+                        }
+                        let! result = p.Subscribe (StoreId body.storeId, domainSub)
+                        match result with
+                        | Error err -> return! writeError err next ctx
+                        | Ok (PushSubscriptionId id) ->
+                            ctx.SetStatusCode 201
+                            let response : SubscribeResponseDto =
+                                { id = id; storeId = body.storeId }
+                            return! json response next ctx
+            }
+
+    let deleteSubscription (push: PushDeps option) : HttpHandler =
+        fun next ctx ->
+            task {
+                match push with
+                | None -> return! writePushDisabled next ctx
+                | Some p ->
+                    let! body = ctx.BindJsonAsync<UnsubscribeRequestDto>()
+                    let bad = isNull (box body)
+                              || System.String.IsNullOrWhiteSpace body.endpoint
+                              || body.storeId <= 0
+                    if bad then
+                        return! writeBadRequest ErrorCodes.InvalidSubscription
+                                    "storeId and endpoint are required"
+                                    next ctx
+                    else
+                        let! result = p.Unsubscribe (StoreId body.storeId, body.endpoint)
+                        match result with
+                        | Error err -> return! writeError err next ctx
+                        | Ok () ->
+                            ctx.SetStatusCode 204
+                            return! next ctx
+            }
+
     // ──── webApp ────────────────────────────────────────────────────────
 
     /// All HTTP dependencies the webApp needs, bundled. Building this
@@ -474,6 +555,10 @@ module HttpHandlers =
         NearbyCache: Cache.Cache<int * int * int, NearbyResponseDto>
         SearchCache: Cache.Cache<string * int, SearchResponseDto>
         ProxyRateLimit: RateLimit.Limiter
+        /// Push subscription handlers. None when push is disabled
+        /// (no Postgres + VAPID config) — endpoints return 503 in
+        /// that case and clients fall back to in-page polling.
+        Push: PushDeps option
     }
 
     let webApp (deps: Deps) : HttpHandler =
@@ -498,6 +583,9 @@ module HttpHandlers =
                         (getHistory deps.History deps.Now)
             GET >=> routef "/stores/%s/uptime"
                         (getUptime deps.History deps.Status deps.Now)
+            GET    >=> route "/vapid-public-key" >=> getVapidPublicKey deps.Push
+            POST   >=> route "/subscriptions"    >=> postSubscription deps.Push
+            DELETE >=> route "/subscriptions"    >=> deleteSubscription deps.Push
             setStatusCode 404
                 >=> json { error = "not_found"; message = "Route not found." }
         ]

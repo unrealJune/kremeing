@@ -47,6 +47,8 @@ let ``OpenAPI spec documents every endpoint we ship`` () =
         "/stores/{id}/hot-light"
         "/stores/{id}/history"
         "/stores/{id}/uptime"
+        "/vapid-public-key"
+        "/subscriptions"
     ] do
         body |> should haveSubstring path
 
@@ -63,6 +65,8 @@ let ``OpenAPI spec documents every error code we emit`` () =
         "invalid_coordinate"
         "range_too_wide"
         "rate_limited"
+        "push_disabled"
+        "invalid_subscription"
     ] do
         body |> should haveSubstring code
 

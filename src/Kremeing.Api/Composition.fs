@@ -31,6 +31,22 @@ module Composition =
         Status = s.Status
     }
 
+    /// Push subscriptions storage + dispatcher seam. None when the
+    /// host doesn't have all three of: Postgres connection, VAPID
+    /// public key, VAPID private key. The HTTP endpoints honor that
+    /// by returning 503 push_disabled.
+    type PushFeature = {
+        Subscriptions: Postgres.PushSubscriptionsStore
+        Vapid: PushDispatch.Vapid
+        Dispatch: PushDispatch.Dispatch
+    }
+
+    let private toPushHandlerDeps (feat: PushFeature) : HttpHandlers.PushDeps = {
+        Subscribe = feat.Subscriptions.Subscribe
+        Unsubscribe = feat.Subscriptions.Unsubscribe
+        VapidPublicKey = feat.Vapid.PublicKey
+    }
+
     /// Production dependencies the host wires into Giraffe + Hosted services.
     type ProductionDeps = {
         Handlers: HttpHandlers.Deps
@@ -43,6 +59,7 @@ module Composition =
             (send: LiveApi.SendHttp)
             (registry: Discovery.RegistryEntry list)
             (observations: ObservationsAdapter)
+            (push: PushFeature option)
             : ProductionDeps =
 
         // Lookup cityStateZip query for a given StoreId by walking the
@@ -96,6 +113,7 @@ module Composition =
             NearbyCache = nearbyCache
             SearchCache = searchCache
             ProxyRateLimit = proxyRateLimit
+            Push = push |> Option.map toPushHandlerDeps
         }
 
         { Handlers = handlers; Record = observations.Record }

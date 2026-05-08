@@ -26,6 +26,8 @@ tags:
     description: Flip events and uptime aggregations from our local store.
   - name: discovery
     description: Find stores by location.
+  - name: push
+    description: Web-push subscription management (Phase 2 + 3).
   - name: meta
     description: Service metadata.
 
@@ -188,6 +190,80 @@ paths:
         '404':
           $ref: '#/components/responses/StoreNotFound'
 
+  /vapid-public-key:
+    get:
+      tags: [push]
+      summary: VAPID public key for the web-push subscription flow
+      description: |
+        Returns the URL-safe-base64 public key the browser must include
+        in `pushManager.subscribe({ applicationServerKey: ... })`. The
+        matching private key never leaves the server. Returns 503
+        `push_disabled` when the operator hasn't configured push
+        (no Postgres + VAPID env vars).
+      responses:
+        '200':
+          description: Public key.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [publicKey]
+                properties:
+                  publicKey:
+                    type: string
+                    description: URL-safe base64 of the 65-byte uncompressed P-256 public key.
+                    example: BDtAWmA4Cjqc5RB8AxJPOf66DaYviPYwmRiW2EkZbEH7AUggXcVBvyKUXoJTCH0IcgesIsxa3Ava7QxJCv_U3i4
+        '503':
+          $ref: '#/components/responses/PushDisabled'
+
+  /subscriptions:
+    post:
+      tags: [push]
+      summary: Subscribe a browser push endpoint to a store's hot-light flips
+      description: |
+        Body matches the JSON shape of the browser's
+        `PushSubscription.toJSON()`. Idempotent on
+        `(storeId, subscription.endpoint)`; re-posting refreshes the
+        keys (handles browser key rotation).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscribeRequest'
+      responses:
+        '201':
+          description: Subscription stored (or refreshed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscribeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/PushDisabled'
+    delete:
+      tags: [push]
+      summary: User-initiated unsubscribe
+      description: |
+        Removes the row matching `(storeId, endpoint)`. Idempotent —
+        no row matching the criteria is treated as a successful
+        no-op. Use this when the user toggles "Notify me" off in the
+        UI; let 410-Gone bounce cleanup handle dead subscriptions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnsubscribeRequest'
+      responses:
+        '204':
+          description: Subscription removed (or already absent).
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/PushDisabled'
+
   /stores/{id}/uptime:
     get:
       tags: [history]
@@ -274,6 +350,15 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    PushDisabled:
+      description: |
+        Push notifications are not configured on this server (no
+        Postgres + VAPID env). Clients can fall back to in-page
+        polling when they see this.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
 
   schemas:
     HotLightStatusValue:
@@ -349,6 +434,47 @@ components:
           type: array
           items: { $ref: '#/components/schemas/NearbyStore' }
 
+    SubscriptionKeys:
+      type: object
+      required: [p256dh, auth]
+      properties:
+        p256dh: { type: string, description: ECDH P-256 public key, URL-safe base64. }
+        auth:   { type: string, description: Auth secret, URL-safe base64. }
+
+    WebPushSubscription:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          description: |
+            Push service URL the browser hands us when calling
+            `pushManager.subscribe()`. Different per browser
+            (FCM, Mozilla autopush, Apple web-push, etc.).
+        keys: { $ref: '#/components/schemas/SubscriptionKeys' }
+
+    SubscribeRequest:
+      type: object
+      required: [storeId, subscription]
+      properties:
+        storeId:      { type: integer, minimum: 1 }
+        subscription: { $ref: '#/components/schemas/WebPushSubscription' }
+
+    SubscribeResponse:
+      type: object
+      required: [id, storeId]
+      properties:
+        id:      { type: integer, format: int64 }
+        storeId: { type: integer }
+
+    UnsubscribeRequest:
+      type: object
+      required: [storeId, endpoint]
+      properties:
+        storeId:  { type: integer, minimum: 1 }
+        endpoint: { type: string, format: uri }
+
     HotLightFlip:
       type: object
       required: [storeId, status, observedAt]
@@ -418,6 +544,8 @@ components:
             - invalid_range
             - range_too_wide
             - rate_limited
+            - push_disabled
+            - invalid_subscription
             - not_found
           description: Stable machine-readable error code.
         message:

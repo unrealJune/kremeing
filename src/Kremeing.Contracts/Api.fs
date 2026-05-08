@@ -108,6 +108,46 @@ module Api =
         buckets: UptimeBucketDto[]
     }
 
+    // ──── push subscriptions ───────────────────────────────────────────
+
+    [<CLIMutable>]
+    type SubscriptionKeysDto = {
+        p256dh: string
+        auth: string
+    }
+
+    /// Mirrors the JSON shape of the browser's `PushSubscription.toJSON()`.
+    /// We deliberately don't model `expirationTime` — it's optional and
+    /// we don't act on it.
+    [<CLIMutable>]
+    type WebPushSubscriptionDto = {
+        endpoint: string
+        keys: SubscriptionKeysDto
+    }
+
+    [<CLIMutable>]
+    type SubscribeRequestDto = {
+        storeId: int
+        subscription: WebPushSubscriptionDto
+    }
+
+    [<CLIMutable>]
+    type SubscribeResponseDto = {
+        id: int64
+        storeId: int
+    }
+
+    [<CLIMutable>]
+    type UnsubscribeRequestDto = {
+        storeId: int
+        endpoint: string
+    }
+
+    [<CLIMutable>]
+    type VapidPublicKeyResponseDto = {
+        publicKey: string
+    }
+
     module BucketSizes =
         [<Literal>]
         let Hour = "hour"
@@ -125,6 +165,10 @@ module Api =
         let RateLimited = "rate_limited"
         [<Literal>]
         let RangeTooWide = "range_too_wide"
+        [<Literal>]
+        let PushDisabled = "push_disabled"
+        [<Literal>]
+        let InvalidSubscription = "invalid_subscription"
 
     module StatusValues =
         [<Literal>]
