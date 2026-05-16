@@ -39,6 +39,23 @@ async function fetchUptime(storeId, bucket /* 'hour' | 'day' */) {
   return body.buckets;
 }
 
+// HotLightFlip: { storeId, status: 'on'|'off'|'unknown', observedAt: ISO }
+// Returns the raw flip log within [since, until] for the granular
+// "today" + "90-day pill" charts. Same-store calls are batched at the
+// caller (BottomSheet) — we always fetch the full 90-day window once,
+// then derive the smaller "today" view from it.
+async function fetchHistory(storeId, sinceIso, untilIso) {
+  const params = new URLSearchParams();
+  if (sinceIso) params.set('since', sinceIso);
+  if (untilIso) params.set('until', untilIso);
+  const qs = params.toString();
+  const url = `${API_BASE}/stores/${storeId}/history${qs ? `?${qs}` : ''}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  return body.flips || [];
+}
+
 // SearchResponse: { query: { q, limit }, stores: NearbyStore[] }
 async function searchStores(q, limit = 12) {
   const url = `${API_BASE}/stores/search?q=${encodeURIComponent(q)}&limit=${limit}`;
@@ -254,9 +271,56 @@ function mockUptime(seed, bucket) {
   return out;
 }
 
+// Mock flip log: a deterministic sequence of HotLightFlip events
+// covering [sinceMs, untilMs]. Used as a `?mock=1` fallback for the
+// granular today + 90-day pill charts (which need raw flips, not the
+// aggregated UptimeBucket shape).
+function mockHistory(seed, sinceIso, untilIso) {
+  const sinceMs = new Date(sinceIso).getTime();
+  const untilMs = new Date(untilIso).getTime();
+  if (!(untilMs > sinceMs)) return [];
+
+  let s = (seed * 9301 + 49297) % 233280;
+  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+
+  const flips = [];
+  // First-observation anchor: pretend we started tracking at sinceMs - 1h
+  // (or earlier — doesn't matter, what matters is it's <= sinceMs so the
+  // first segment has a known status).
+  flips.push({
+    storeId: seed,
+    status: 'off',
+    observedAt: new Date(sinceMs - 3600_000).toISOString(),
+  });
+
+  // For each local day in the range, emit on/off flips around the two
+  // typical peaks (5–10am, 5–8pm). Keeps the rendering interesting
+  // without trying to mimic any real store's schedule.
+  for (let dayStart = startOfLocalDay(sinceMs); dayStart < untilMs; dayStart += 86400_000) {
+    for (const [hStart, hEnd] of [[6, 10], [17, 20]]) {
+      // Add some jitter so the visualization doesn't look like a comb.
+      const onMs = dayStart + (hStart + rand() * 0.5) * 3600_000;
+      const offMs = dayStart + (hEnd - rand() * 0.5) * 3600_000;
+      if (onMs > sinceMs && onMs < untilMs) {
+        flips.push({ storeId: seed, status: 'on', observedAt: new Date(onMs).toISOString() });
+      }
+      if (offMs > sinceMs && offMs < untilMs) {
+        flips.push({ storeId: seed, status: 'off', observedAt: new Date(offMs).toISOString() });
+      }
+    }
+  }
+  flips.sort((a, b) => new Date(a.observedAt) - new Date(b.observedAt));
+  return flips;
+}
+
+function startOfLocalDay(ms) {
+  const d = new Date(ms);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
 Object.assign(window, {
   KREMEING_API: {
-    fetchNearbyStores, searchStores, fetchUptime, fetchHotLight,
+    fetchNearbyStores, searchStores, fetchUptime, fetchHistory, fetchHotLight,
     getVapidPublicKey, subscribeStore, unsubscribeStore,
     listSubscribedStores, pushSupported,
     PUSH_DISABLED, PUSH_UNSUPPORTED,
@@ -264,6 +328,7 @@ Object.assign(window, {
   KREMEING_USE_MOCKS: USE_MOCKS,
   MOCK_STORES,
   mockUptime,
+  mockHistory,
   relativeTime,
   shortName,
   isHot,
