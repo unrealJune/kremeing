@@ -302,54 +302,428 @@ function StoreList({ stores, scheme, onClose, onPick }) {
 // ────────────────────────────────────────────────────────────────────────
 // Hour strip — 24 UptimeBuckets, current hour highlighted
 // ────────────────────────────────────────────────────────────────────────
-function HourStrip({ buckets, scheme }) {
-  if (!buckets || buckets.length === 0) {
+// ────────────────────────────────────────────────────────────────────────
+// DayTimeline — scrubbable minute-resolution view of one local day.
+//
+// Built from the raw flip list (HotLightHistory), reconstructed into
+// on/off/unknown intervals by `window.KREMEING_UPTIME.flipsToIntervals`.
+// Falls back to the legacy hourly UptimeBucket strip when no flip data
+// is available (older API, transient failure, no-mock mode).
+//
+// The "usually on" probability ribbon is rendered *behind* the live
+// track so today's actual state always reads on top.
+// ────────────────────────────────────────────────────────────────────────
+function HourStrip({ intervals, hourlyBuckets, probabilities, basis, scheme, dayStartMs, dayEndMs }) {
+  const trackRef = React.useRef(null);
+  const [hoverMs, setHoverMs] = React.useState(null);
+
+  const dayLenMs = dayEndMs - dayStartMs;
+
+  // All hooks must run unconditionally — guards happen after.
+  const msFromClientX = React.useCallback((clientX) => {
+    const el = trackRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    return dayStartMs + Math.round((x / rect.width) * dayLenMs);
+  }, [dayStartMs, dayLenMs]);
+
+  const onPointerMove = React.useCallback((e) => setHoverMs(msFromClientX(e.clientX)),
+    [msFromClientX]);
+  const onPointerLeave = React.useCallback(() => setHoverMs(null), []);
+
+  // No data of either kind → empty placeholder.
+  const haveIntervals = intervals && intervals.length > 0;
+  const haveBuckets = hourlyBuckets && hourlyBuckets.length > 0;
+  if (!haveIntervals && !haveBuckets) {
     return <div style={{ height: 28, color: scheme.onSurfaceVariant, fontSize: 13 }}>No data</div>;
   }
-  const now = new Date();
+
+  const nowMs = Date.now();
+
+  // ── helpers ────────────────────────────────────────────────────────
+  const pct = (ms) => ((ms - dayStartMs) / dayLenMs) * 100;
+  const statusColor = (status) => {
+    if (status === 'on') return scheme.primary;
+    if (status === 'off') return scheme.surfaceContainerHigh;
+    return scheme.outlineVariant;   // unknown
+  };
+
+  // Find the interval that contains a given time, plus the segment we're
+  // "currently in" (for the "ON since …" readout).
+  const findInterval = (ms) => {
+    if (!haveIntervals) return null;
+    for (const iv of intervals) {
+      if (ms >= iv.startMs && ms < iv.endMs) return iv;
+    }
+    return null;
+  };
+
+  const hoverInterval = hoverMs != null ? findInterval(hoverMs) : null;
+
+  // Render the segments. Use absolute positioning over a single track so
+  // each segment is exactly its time-fraction wide regardless of how the
+  // track is sized.
+  const segmentNodes = haveIntervals
+    ? intervals.map((iv, i) => {
+        const left = Math.max(0, pct(iv.startMs));
+        const right = Math.min(100, pct(iv.endMs));
+        return (
+          <div key={i} style={{
+            position: 'absolute',
+            top: 0, bottom: 0,
+            left: `${left}%`,
+            width: `${right - left}%`,
+            background: statusColor(iv.status),
+            opacity: iv.status === 'on' ? 1 : (iv.status === 'unknown' ? 0.55 : 0.85),
+          }} />
+        );
+      })
+    // Fallback: render the legacy hourly buckets as 24 stacked slices so
+    // the chart degrades gracefully when /history is unavailable.
+    : hourlyBuckets.map((b, i) => {
+        const left = (i / hourlyBuckets.length) * 100;
+        const width = 100 / hourlyBuckets.length;
+        const frac = b.fractionOn ?? 0;
+        const observedRatio = b.totalSeconds > 0 ? (b.observedSeconds / b.totalSeconds) : 1;
+        const bg = observedRatio < 0.25
+          ? scheme.outlineVariant
+          : (frac > 0.5 ? scheme.primary
+             : (frac > 0 ? scheme.primary + '99' : scheme.surfaceContainerHigh));
+        return (
+          <div key={i} style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: `${left}%`, width: `${width}%`,
+            background: bg,
+            opacity: frac === 0 ? 0.6 : 1,
+          }} />
+        );
+      });
+
+  // ── "Usually on" probability ribbon ──────────────────────────────────
+  // A row of thin slices above the main track, each filled with
+  // scheme.primary at alpha proportional to P(on). Subtle by design —
+  // it should hint at the typical schedule without competing visually
+  // with the live status segments.
+  const ribbon = probabilities
+    ? Array.from(probabilities).map((p, i) => {
+        const slotW = 100 / probabilities.length;
+        // Map 0..1 → 0x10..0x66 alpha (16..102 / 255) so the ribbon
+        // stays subtle even when P=1.
+        const alpha = Math.round(16 + p * 86);
+        const hex = alpha.toString(16).padStart(2, '0');
+        return (
+          <div key={i} style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: `${i * slotW}%`, width: `${slotW}%`,
+            background: scheme.primary + hex,
+          }} />
+        );
+      })
+    : null;
+
+  const nowPct = pct(Math.max(dayStartMs, Math.min(dayEndMs, nowMs)));
+  const hoverPct = hoverMs != null ? pct(hoverMs) : null;
+
+  // ── Scrub readout ────────────────────────────────────────────────────
+  let readout;
+  if (hoverMs == null) {
+    readout = '';
+  } else {
+    const time = new Date(hoverMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const statusWord = hoverInterval
+      ? (hoverInterval.status === 'on' ? 'ON'
+         : hoverInterval.status === 'off' ? 'OFF'
+         : 'Unknown')
+      : '—';
+    let sincePart = '';
+    if (hoverInterval && hoverInterval.status !== 'unknown') {
+      const sinceTime = new Date(hoverInterval.startMs).toLocaleTimeString(
+        [], { hour: 'numeric', minute: '2-digit' });
+      sincePart = ` (since ${sinceTime})`;
+    }
+    let probPart = '';
+    if (probabilities) {
+      const slot = Math.min(probabilities.length - 1,
+        Math.floor(((hoverMs - dayStartMs) / dayLenMs) * probabilities.length));
+      const pctOn = Math.round(probabilities[slot] * 100);
+      probPart = ` · usually on ${pctOn}%${basis ? ` of ${basis}` : ''}`;
+    }
+    readout = `${time} · ${statusWord}${sincePart}${probPart}`;
+  }
+
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', gap: 2, height: 28, width: '100%', alignItems: 'flex-end' }}>
-        {buckets.map((b, i) => {
-          const frac = b.fractionOn ?? 0;
-          const observedRatio = b.totalSeconds > 0 ? (b.observedSeconds / b.totalSeconds) : 1;
-          const isCurrent = new Date(b.startUtc) <= now && now < new Date(b.endUtc);
-          const height = frac > 0 ? Math.max(8, 8 + frac * 20) : 6;
-          const bg = observedRatio < 0.25
-            ? scheme.outlineVariant
-            : (frac > 0.5 ? scheme.primary : (frac > 0 ? scheme.primary + '99' : scheme.surfaceContainerHigh));
-          return (
-            <div key={i} style={{
-              flex: 1,
-              height,
-              borderRadius: 3,
-              background: bg,
-              outline: isCurrent ? `2px solid ${scheme.onSurface}` : 'none',
-              outlineOffset: 1,
-              transition: 'height 200ms',
-            }} />
-          );
-        })}
+      {/* Stack: ribbon (back) → segments (middle) → indicators (front) */}
+      <div
+        ref={trackRef}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerMove}
+        onPointerLeave={onPointerLeave}
+        onPointerCancel={onPointerLeave}
+        style={{
+          position: 'relative', height: 28, width: '100%',
+          borderRadius: 6, overflow: 'hidden',
+          background: scheme.surfaceContainerLow,
+          touchAction: 'pan-y',
+          cursor: 'crosshair',
+        }}
+      >
+        {ribbon && (
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            {ribbon}
+          </div>
+        )}
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          {segmentNodes}
+        </div>
+        {/* "Now" marker */}
+        <div style={{
+          position: 'absolute', top: -2, bottom: -2,
+          left: `${nowPct}%`, width: 2,
+          background: scheme.onSurface,
+          transform: 'translateX(-1px)',
+          pointerEvents: 'none',
+        }} />
+        {/* Hover caret */}
+        {hoverPct != null && (
+          <div style={{
+            position: 'absolute', top: -2, bottom: -2,
+            left: `${hoverPct}%`, width: 1,
+            background: scheme.primary,
+            transform: 'translateX(-0.5px)',
+            pointerEvents: 'none',
+          }} />
+        )}
       </div>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', marginTop: 8,
-        fontSize: 11, color: scheme.onSurfaceVariant,
-      }}>
+      <div
+        aria-live="polite"
+        style={{
+          display: 'flex', justifyContent: 'space-between', marginTop: 8,
+          fontSize: 11, color: scheme.onSurfaceVariant, minHeight: 14,
+        }}
+      >
         <span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span>
+      </div>
+      <div
+        aria-live="polite"
+        style={{
+          marginTop: 4, fontSize: 12, color: scheme.onSurfaceVariant,
+          minHeight: 16,
+        }}
+      >
+        {readout}
       </div>
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// Uptime chart — 90 daily UptimeBuckets, hover scrubs
+// UptimeChart — 90-day grid of intraday pills. Each row represents one
+// local-time day rendered as a thin horizontal track filled with on/off
+// segments (orange = on, neutral = off, hairline = unobserved). Tap/hold
+// scrubs in 2-D: vertical position picks the day, horizontal position
+// picks the time-of-day.
+//
+// Falls back to vertical fractionOn bars (the legacy view) if no flip
+// history is available.
 // ────────────────────────────────────────────────────────────────────────
-function UptimeChart({ buckets, scheme }) {
+function UptimeChart({ daysByLocal, dailyBuckets, scheme }) {
+  // Sort days oldest → newest so the visual ordering matches the
+  // "{n} days ago … Today" footer labels.
+  const days = React.useMemo(() => {
+    if (!daysByLocal) return null;
+    return Array.from(daysByLocal.entries())
+      .map(([key, info]) => ({ key, ...info }))
+      .sort((a, b) => a.dayStartMs - b.dayStartMs);
+  }, [daysByLocal]);
+
+  const haveHistory = days && days.length > 0;
+  const haveBuckets = dailyBuckets && dailyBuckets.length > 0;
+
+  if (!haveHistory && !haveBuckets) {
+    return <div style={{ height: 38, color: scheme.onSurfaceVariant, fontSize: 13 }}>No data</div>;
+  }
+
+  // Delegate to dedicated child components so each branch's own hooks
+  // are called unconditionally inside their function bodies.
+  if (!haveHistory) {
+    return <LegacyDailyBars buckets={dailyBuckets} scheme={scheme} />;
+  }
+  return <NinetyDayGrid days={days} scheme={scheme} />;
+}
+
+// Inner component for the "we have raw history" branch. Split out so
+// the hooks below are unconditional regardless of how UptimeChart's
+// guards resolve.
+function NinetyDayGrid({ days, scheme }) {
+  const trackRef = React.useRef(null);
+  const [hover, setHover] = React.useState(null);
+
+  const hoverFromClient = React.useCallback((clientX, clientY) => {
+    const el = trackRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
+    const y = Math.max(0, Math.min(rect.height, clientY - rect.top));
+    const dayIdx = Math.min(days.length - 1,
+      Math.max(0, Math.floor((y / rect.height) * days.length)));
+    const dayInfo = days[dayIdx];
+    const dayLen = dayInfo.dayEndMs - dayInfo.dayStartMs;
+    const ms = dayInfo.dayStartMs + (x / rect.width) * dayLen;
+    return { dayIdx, ms };
+  }, [days]);
+
+  const onPointerMove = React.useCallback((e) => {
+    setHover(hoverFromClient(e.clientX, e.clientY));
+  }, [hoverFromClient]);
+  const onPointerLeave = React.useCallback(() => setHover(null), []);
+
+  // Build the readout for the hovered day+time.
+  let readout = '';
+  if (hover) {
+    const day = days[hover.dayIdx];
+    const dayDate = new Date(day.dayStartMs);
+    const dateLabel = dayDate.toLocaleDateString(
+      [], { weekday: 'short', month: 'numeric', day: 'numeric' });
+    const time = new Date(hover.ms).toLocaleTimeString(
+      [], { hour: 'numeric', minute: '2-digit' });
+    let status = '—';
+    for (const seg of day.segments) {
+      if (hover.ms >= seg.startMs && hover.ms < seg.endMs) {
+        status = seg.status === 'on' ? 'ON'
+               : seg.status === 'off' ? 'OFF'
+               : 'Unknown';
+        break;
+      }
+    }
+    readout = `${dateLabel} · ${time} · ${status}`;
+  }
+
+  // Pre-compute pill gradients so we don't re-render N children per pill.
+  // A `linear-gradient(to right, color1 a%, color1 b%, color2 b%, color2 c%, …)`
+  // string places hard-edged stops at exactly the right time fractions.
+  const gradientFor = (day) => {
+    if (day.segments.length === 0) {
+      return scheme.outlineVariant;
+    }
+    const dayLen = day.dayEndMs - day.dayStartMs;
+    const stops = [];
+    for (const seg of day.segments) {
+      const a = ((seg.startMs - day.dayStartMs) / dayLen) * 100;
+      const b = ((seg.endMs - day.dayStartMs) / dayLen) * 100;
+      const color = seg.status === 'on' ? scheme.primary
+                  : seg.status === 'off' ? scheme.surfaceContainerHigh
+                  : scheme.outlineVariant;
+      stops.push(`${color} ${a}%`, `${color} ${b}%`);
+    }
+    return `linear-gradient(to right, ${stops.join(', ')})`;
+  };
+
+  // Day labels — keep them sparse on tall lists. Mark every Sunday plus
+  // first/last so users can orient without label clutter on every row.
+  const showLabel = (day, idx) => {
+    if (idx === 0 || idx === days.length - 1) return true;
+    return new Date(day.dayStartMs).getDay() === 0;
+  };
+
+  const PILL_HEIGHT = Math.max(4, Math.min(8, Math.floor(360 / Math.max(days.length, 1))));
+  const PILL_GAP = 1;
+  const totalHeight = days.length * (PILL_HEIGHT + PILL_GAP);
+
+  return (
+    <div style={{ width: '100%' }}>
+      {/* Top tick row — 4 segments matching the bottom labels under the
+          today view, so users learn one x-axis and recognize it here. */}
+      <div style={{
+        position: 'relative', height: 12, marginBottom: 4,
+        fontSize: 10, color: scheme.onSurfaceVariant,
+      }}>
+        {[0, 25, 50, 75, 100].map((p, i) => (
+          <div key={i} style={{
+            position: 'absolute', left: `${p}%`,
+            transform: i === 0 ? 'translateX(0)'
+                     : i === 4 ? 'translateX(-100%)'
+                     : 'translateX(-50%)',
+          }}>{['12a', '6a', '12p', '6p', '12a'][i]}</div>
+        ))}
+      </div>
+      <div
+        ref={trackRef}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerMove}
+        onPointerLeave={onPointerLeave}
+        onPointerCancel={onPointerLeave}
+        style={{
+          position: 'relative', width: '100%', height: totalHeight,
+          touchAction: 'pan-y',
+        }}
+      >
+        {days.map((day, i) => {
+          const top = i * (PILL_HEIGHT + PILL_GAP);
+          const isHover = hover && hover.dayIdx === i;
+          return (
+            <React.Fragment key={day.key}>
+              <div style={{
+                position: 'absolute', top, height: PILL_HEIGHT,
+                left: 0, right: 0,
+                background: gradientFor(day),
+                borderRadius: 2,
+                opacity: hover && !isHover ? 0.55 : 1,
+                transition: 'opacity 160ms',
+              }} />
+              {showLabel(day, i) && PILL_HEIGHT >= 6 && (
+                <div style={{
+                  position: 'absolute', top: top - 1, left: 0,
+                  fontSize: 9, color: scheme.onSurfaceVariant,
+                  background: scheme.surfaceContainerLow,
+                  padding: '0 3px', pointerEvents: 'none',
+                }}>
+                  {new Date(day.dayStartMs).toLocaleDateString(
+                    [], { month: 'numeric', day: 'numeric' })}
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+        {hover && (
+          <div style={{
+            position: 'absolute',
+            top: hover.dayIdx * (PILL_HEIGHT + PILL_GAP) - 1,
+            height: PILL_HEIGHT + 2,
+            left: 0, right: 0,
+            outline: `1px solid ${scheme.onSurface}`,
+            outlineOffset: -1, borderRadius: 2,
+            pointerEvents: 'none',
+          }} />
+        )}
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', marginTop: 8,
+        fontSize: 11, color: scheme.onSurfaceVariant,
+      }}>
+        <span>{days.length} days ago</span>
+        <span>Today</span>
+      </div>
+      <div
+        aria-live="polite"
+        style={{
+          marginTop: 4, fontSize: 12, color: scheme.onSurfaceVariant,
+          minHeight: 16,
+        }}
+      >
+        {readout}
+      </div>
+    </div>
+  );
+}
+
+// Legacy fractionOn bars — kept as a graceful-degradation path when the
+// /history endpoint isn't available (older API or transient failure).
+function LegacyDailyBars({ buckets, scheme }) {
   const [hover, setHover] = React.useState(null);
   const trackRef = React.useRef(null);
 
-  // Touch / pointer support — phones don't fire mouseenter, so we map
-  // the touch X coordinate into a bar index against the chart's width.
   const indexFromClientX = React.useCallback((clientX) => {
     const el = trackRef.current;
     if (!el || !buckets || buckets.length === 0) return null;
@@ -361,19 +735,15 @@ function UptimeChart({ buckets, scheme }) {
   const onPointerMove = React.useCallback((e) => {
     setHover(indexFromClientX(e.clientX));
   }, [indexFromClientX]);
-
   const onPointerLeave = React.useCallback(() => setHover(null), []);
 
-  if (!buckets || buckets.length === 0) {
-    return <div style={{ height: 38, color: scheme.onSurfaceVariant, fontSize: 13 }}>No data</div>;
-  }
   return (
     <div style={{ width: '100%' }}>
       <div
         ref={trackRef}
         style={{
           display: 'flex', alignItems: 'flex-end', gap: 1.5, height: 38, width: '100%',
-          touchAction: 'pan-y',   // let the page still scroll vertically
+          touchAction: 'pan-y',
         }}
         onPointerMove={onPointerMove}
         onPointerDown={onPointerMove}
@@ -395,7 +765,7 @@ function UptimeChart({ buckets, scheme }) {
               style={{
                 flex: 1, minWidth: 0, height: h, background: bg,
                 borderRadius: 2,
-                pointerEvents: 'none',  // pointer events go to the track, not the bars
+                pointerEvents: 'none',
                 opacity: hover !== null && hover !== i ? 0.45 : 1,
                 transition: 'opacity 160ms',
               }}
@@ -422,13 +792,19 @@ function UptimeChart({ buckets, scheme }) {
 // Bottom Sheet — fetches uptime when opened, switches by tab
 // ────────────────────────────────────────────────────────────────────────
 function BottomSheet({
-  store, onClose, scheme, fetchUptimeBuckets,
+  store, onClose, scheme, fetchUptimeBuckets, fetchHistoryFlips,
   initiallySubscribed = false,
   onSubscribed, onUnsubscribed,
 }) {
   const [tab, setTab] = React.useState('today');
   const [hourly, setHourly] = React.useState(null);
   const [daily, setDaily] = React.useState(null);
+  // 90 days of raw flip events, fetched once when the sheet opens.
+  // Drives both the day timeline + the 90-day pill grid + the
+  // "usually on" overlay. null = still loading or unavailable; an
+  // empty array is a valid "we have nothing" answer.
+  const [history, setHistory] = React.useState(null);
+  const [showOverlay, setShowOverlay] = React.useState(true);
 
   // ── share + notify ───────────────────────────────────────────────────
   const [shareToast, setShareToast] = React.useState(null);   // 'copied' | 'error' | null
@@ -477,11 +853,25 @@ function BottomSheet({
 
   React.useEffect(() => {
     let cancelled = false;
-    setHourly(null); setDaily(null);
+    setHourly(null); setDaily(null); setHistory(null);
     fetchUptimeBuckets(store.id, 'hour').then(b => { if (!cancelled) setHourly(b); });
     fetchUptimeBuckets(store.id, 'day').then(b => { if (!cancelled) setDaily(b); });
+    // 90-day raw flip history — drives all three new visualizations.
+    // `fetchHistoryFlips` is optional so older callers/tests still work.
+    if (fetchHistoryFlips) {
+      const until = new Date();
+      const since = new Date(until.getTime() - 90 * 86400_000);
+      fetchHistoryFlips(store.id, since.toISOString(), until.toISOString())
+        .then(flips => {
+          if (cancelled) return;
+          // `null` from the fetcher signals failure; treat that as
+          // "history unavailable" so the charts fall back to buckets.
+          // An empty array is a legitimate response (new store).
+          setHistory(flips == null ? null : flips);
+        });
+    }
     return () => { cancelled = true; };
-  }, [store.id, fetchUptimeBuckets]);
+  }, [store.id, fetchUptimeBuckets, fetchHistoryFlips]);
 
   // Stop polling when the sheet unmounts (close, navigate, sheet swap).
   React.useEffect(() => () => {
@@ -628,6 +1018,37 @@ function BottomSheet({
   const hot = store.currentStatus === 'on';
   const unknown = store.currentStatus === 'unknown';
   const since = window.relativeTime(store.lastFlippedAt);
+
+  // ── Derived: reconstruct intervals + probability ribbon from flips ───
+  // useMemo keeps these stable across re-renders driven by hover state
+  // inside the child charts. Recomputed only when `history` changes.
+  const U = window.KREMEING_UPTIME;
+  const today = React.useMemo(() => U ? U.localDayBounds(Date.now()) : null, [history, U]);
+  const allIntervals = React.useMemo(() => {
+    if (!U || history == null) return null;
+    const since90 = Date.now() - 90 * 86400_000;
+    return U.flipsToIntervals(history, since90, Date.now());
+  }, [history, U]);
+  const todayIntervals = React.useMemo(() => {
+    if (!allIntervals || !today) return null;
+    return allIntervals
+      .filter(iv => iv.endMs > today.startMs && iv.startMs < today.endMs)
+      .map(iv => ({
+        startMs: Math.max(iv.startMs, today.startMs),
+        endMs: Math.min(iv.endMs, today.endMs),
+        status: iv.status,
+      }));
+  }, [allIntervals, today]);
+  const daysByLocal = React.useMemo(() => {
+    if (!U || !allIntervals) return null;
+    const since90 = Date.now() - 90 * 86400_000;
+    return U.splitIntervalsByLocalDay(allIntervals, since90, Date.now());
+  }, [allIntervals, U]);
+  const overlay = React.useMemo(() => {
+    if (!U || !allIntervals || !showOverlay) return null;
+    return U.commonOnProbabilities(allIntervals, Date.now());
+  }, [allIntervals, showOverlay, U]);
+  const overlayBasisLabel = overlay && U ? U.basisLabel(overlay.basis, Date.now()) : null;
 
   // Combine entrance, drag-follow, and exit. Closing wins over dragY so
   // releasing past threshold animates cleanly to off-screen.
@@ -868,14 +1289,61 @@ function BottomSheet({
 
         <div style={{ minHeight: 60, marginBottom: 12 }}>
           {tab === 'today'
-            ? <HourStrip buckets={hourly} scheme={scheme} />
-            : <UptimeChart buckets={daily} scheme={scheme} />}
+            ? <HourStrip
+                intervals={todayIntervals}
+                hourlyBuckets={hourly}
+                probabilities={overlay ? overlay.probabilities : null}
+                basis={overlayBasisLabel}
+                scheme={scheme}
+                dayStartMs={today ? today.startMs : Date.now() - 12 * 3600_000}
+                dayEndMs={today ? today.endMs : Date.now() + 12 * 3600_000}
+              />
+            : <UptimeChart
+                daysByLocal={daysByLocal}
+                dailyBuckets={daily}
+                scheme={scheme}
+              />}
         </div>
+        {tab === 'today' && overlay && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            marginBottom: 12, fontSize: 12, color: scheme.onSurfaceVariant,
+          }}>
+            <button
+              onClick={() => setShowOverlay(s => !s)}
+              aria-pressed={showOverlay}
+              style={{
+                border: `1px solid ${scheme.outline}`,
+                background: showOverlay ? scheme.secondaryContainer : 'transparent',
+                color: showOverlay ? scheme.onSecondaryContainer : scheme.onSurface,
+                padding: '4px 10px', borderRadius: 9999,
+                fontSize: 12, fontFamily: 'inherit', cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+              }}
+              title={`Based on the last 90 days of ${overlayBasisLabel}`}
+            >
+              <span style={{
+                width: 8, height: 8, borderRadius: 2,
+                background: scheme.primary + '66', display: 'inline-block',
+              }} />
+              Usually on
+            </button>
+            <span>Based on past {overlayBasisLabel}</span>
+          </div>
+        )}
+        {tab === 'today' && !overlay && history != null && (
+          <div style={{
+            marginBottom: 12, fontSize: 12, color: scheme.onSurfaceVariant,
+          }}>
+            Not enough history yet for a "usually on" estimate.
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 Object.assign(window, {
-  TopAppBar, BottomSheet, StoreList, UptimeChart, HourStrip, LocateButton,
+  TopAppBar, BottomSheet, StoreList, UptimeChart, NinetyDayGrid, LegacyDailyBars,
+  HourStrip, LocateButton,
 });

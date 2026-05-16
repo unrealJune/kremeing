@@ -177,6 +177,7 @@
   <div id="root"></div>
 
   <script src="stores.js"></script>
+  <script src="uptime-utils.js"></script>
   <!-- Service worker: registered as soon as the page loads so push
        payloads route to /sw.js even before React mounts. Failures are
        non-fatal (older browsers, file:// origins, etc.). -->
@@ -430,6 +431,20 @@
         }
       }, []);
 
+      // ── Raw flip history — powers the scrubbable today timeline,
+      //    the 90-day pill grid, and the "usually on" overlay.
+      //    Returns the raw flip list, or null on failure so the
+      //    BottomSheet can fall back to bucket-aggregated rendering.
+      const fetchHistoryFlips = React.useCallback(async (storeId, sinceIso, untilIso) => {
+        try {
+          return await window.KREMEING_API.fetchHistory(storeId, sinceIso, untilIso);
+        } catch (err) {
+          console.warn(`[kremeing] /stores/${storeId}/history failed:`, err.message);
+          if (window.KREMEING_USE_MOCKS) return window.mockHistory(storeId, sinceIso, untilIso);
+          return null;
+        }
+      }, []);
+
       const hotCount = stores.filter((s) => s.currentStatus === 'on').length;
       const selectedStore = stores.find((s) => s.id === selected);
 
@@ -484,6 +499,7 @@
               scheme={scheme}
               onClose={() => setSelected(null)}
               fetchUptimeBuckets={fetchUptimeBuckets}
+              fetchHistoryFlips={fetchHistoryFlips}
               initiallySubscribed={subscribedStoreIds.has(selectedStore.id)}
               onSubscribed={onSubscribed}
               onUnsubscribed={onUnsubscribed}
