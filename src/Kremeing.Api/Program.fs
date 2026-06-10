@@ -8,6 +8,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Giraffe
+open Kremeing.Contracts.Domain
 
 /// What this process does. K8s splits the workload across two
 /// deployments so we can scale HTTP horizontally while keeping the
@@ -70,25 +71,20 @@ let private httpClientSend (client: HttpClient) : LiveApi.SendHttp =
 /// Runs Discovery on startup. Synchronous because both API and poller
 /// are useless without a registry — better to fail loudly here than
 /// serve empty responses for 5 minutes until the first poller tick.
+/// Reuses DiscoveryRefresh.runDiscovery so startup and the periodic
+/// refresh resolve the registry through the exact same path.
 let private discoverRegistry
         (logger: ILogger)
         (send: LiveApi.SendHttp)
+        (search: string -> Async<Result<LiveApi.KrispyShopDto list, StoreError>>)
         : Discovery.RegistryEntry list =
     logger.LogInformation "Discovery starting…"
-    let page =
-        match Discovery.enumerateCities send |> Async.RunSynchronously with
-        | Ok p -> p
+    let registry =
+        match DiscoveryRefresh.runDiscovery send search |> Async.RunSynchronously with
+        | Ok r -> r
         | Error e ->
             logger.LogError("Discovery failed: {error}", sprintf "%A" e)
-            { Cities = []; Stores = [] }
-    logger.LogInformation(
-        "Discovered {cities} cities, {directStores} direct-store links",
-        page.Cities.Length, page.Stores.Length)
-
-    let search key = LiveApi.searchByCityState send key
-    let registry =
-        Discovery.resolveRegistry search page
-        |> Async.RunSynchronously
+            []
     logger.LogInformation("Resolved registry: {count} stores", registry.Length)
     registry
 
@@ -157,6 +153,33 @@ let private buildPushFeature
              will return 503", why)
         None
 
+/// Resolves the periodic discovery-refresh interval. Defaults to 12h
+/// (twice daily); `KREMEING_DISCOVERY_REFRESH_INTERVAL` overrides it with a
+/// positive number of hours (e.g. "6" or "0.5"). Invalid values fall back
+/// to the default with a warning rather than failing startup.
+let private discoveryRefreshConfig (logger: ILogger) : DiscoveryRefresh.Config =
+    match Environment.GetEnvironmentVariable "KREMEING_DISCOVERY_REFRESH_INTERVAL" with
+    | NotNullOrWhitespace raw ->
+        match
+            Double.TryParse(
+                raw,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture)
+        with
+        | true, hours when hours > 0.0 ->
+            let interval = TimeSpan.FromHours hours
+            logger.LogInformation(
+                "Discovery refresh interval set to {interval} (from \
+                 KREMEING_DISCOVERY_REFRESH_INTERVAL)", interval)
+            { Interval = interval }
+        | _ ->
+            logger.LogWarning(
+                "KREMEING_DISCOVERY_REFRESH_INTERVAL='{raw}' is not a positive number \
+                 of hours; using default {default}",
+                raw, DiscoveryRefresh.defaultConfig.Interval)
+            DiscoveryRefresh.defaultConfig
+    | _ -> DiscoveryRefresh.defaultConfig
+
 [<EntryPoint>]
 let main args =
     let builder = WebApplication.CreateBuilder(args)
@@ -174,24 +197,28 @@ let main args =
 
     let observations, postgresCs = buildObservations logger
     let push = buildPushFeature logger postgresCs
-    let registry = discoverRegistry logger send
-    let deps = Composition.build send registry observations push
+    let search key = LiveApi.searchByCityState send key
+    let registry = discoverRegistry logger send search
+    // Shared, mutable registry: startup seeds it; the periodic refresh
+    // swaps it. Both the poller and the read handlers read through the
+    // holder so a refresh is visible everywhere at once.
+    let registryHolder = Registry.Holder(registry, DateTimeOffset.UtcNow)
+    let deps = Composition.build send registryHolder observations push
 
-    // Poller registration is gated by role — only one deployment runs
-    // it, so multiple API replicas don't multiply our upstream load.
+    // Poller + discovery refresh are gated by role — only one deployment
+    // runs them, so multiple API replicas don't multiply our upstream load.
     let runsPoller =
         match activeRole with
         | Poller | All -> true
         | Api -> false
 
     if runsPoller then
-        let pollerSearch key = LiveApi.searchByCityState send key
         builder.Services.AddSingleton<Poller.Config>(Poller.defaultConfig) |> ignore
         builder.Services.AddSingleton<Poller.PollerService>(fun sp ->
             let pLogger = sp.GetRequiredService<ILogger<Poller.PollerService>>()
-            Poller.PollerService(
-                registry,
-                pollerSearch,
+            new Poller.PollerService(
+                registryHolder.Get,
+                search,
                 deps.Record,
                 deps.NotifyFlipOn,
                 Poller.defaultConfig,
@@ -199,6 +226,20 @@ let main args =
         |> ignore
         builder.Services.AddHostedService<Poller.PollerService>(fun sp ->
             sp.GetRequiredService<Poller.PollerService>())
+        |> ignore
+
+        // Periodic discovery refresh: self-heals the registry and (critically)
+        // refuses to replace a good registry with an empty/failed one.
+        let refreshConfig = discoveryRefreshConfig logger
+        builder.Services.AddHostedService<DiscoveryRefresh.DiscoveryRefreshService>(fun sp ->
+            let rLogger =
+                sp.GetRequiredService<ILogger<DiscoveryRefresh.DiscoveryRefreshService>>()
+            new DiscoveryRefresh.DiscoveryRefreshService(
+                registryHolder,
+                send,
+                search,
+                refreshConfig,
+                rLogger))
         |> ignore
 
     let app = builder.Build()

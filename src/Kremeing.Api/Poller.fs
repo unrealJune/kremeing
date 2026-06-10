@@ -112,9 +112,12 @@ module Poller =
     /// Hosted service that runs `runOnce` on a timer until shutdown.
     /// Per-tick exceptions are logged but don't kill the service —
     /// transient upstream blips shouldn't take down the whole API.
+    ///
+    /// `getRegistry` is read fresh on every tick (not captured once) so a
+    /// periodic discovery refresh is picked up without restarting the poller.
     type PollerService
         (
-            registry: Discovery.RegistryEntry list,
+            getRegistry: unit -> Discovery.RegistryEntry list,
             search: string -> Async<Result<LiveApi.KrispyShopDto list, StoreError>>,
             record: Ports.RecordObservation,
             notifyFlipOn: PushNotify.OnHotLightFlipOn,
@@ -127,13 +130,13 @@ module Poller =
             task {
                 logger.LogInformation(
                     "Poller starting: stores={count}, interval={interval}",
-                    registry.Length, config.Interval)
+                    (getRegistry ()).Length, config.Interval)
 
                 while not stopToken.IsCancellationRequested do
                     try
                         let! stats =
                             runOnce
-                                registry search record notifyFlipOn
+                                (getRegistry ()) search record notifyFlipOn
                                 (fun () -> DateTimeOffset.UtcNow)
                         logger.LogInformation(
                             "tick: polled={polled} recorded={recorded} missing={missing} \
