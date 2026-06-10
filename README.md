@@ -32,9 +32,12 @@ plus an OpenAPI 3.1 reference at `/docs`.
                   site.krispykreme.com
 ```
 
-- **Discovery**: scrapes `site.krispykreme.com` once on startup and again
-  daily, then resolves each (city, state) to upstream `shopId`s via
-  `api.krispykreme.com/shops/search`. Yields ~344 US stores.
+- **Discovery**: scrapes `site.krispykreme.com` on startup and then
+  periodically (every 12 hours by default), resolving each (city, state)
+  to upstream `shopId`s via `api.krispykreme.com/shops/search`. Yields
+  ~344 US stores. A refresh that resolves **0 stores** (or otherwise
+  fails) is rejected — the previous good registry is kept rather than
+  silently clobbered to empty.
 - **Flip-only storage**: only status *changes* land in `flip_events`. A
   separate `store_status` row per shop tracks `last_polled_at` so
   staleness stays observable even when nothing flipped.
@@ -142,6 +145,7 @@ kremeing/
 |---|---|---|---|
 | `KREMEING_DATABASE_URL` | recommended | — (in-memory) | URL or Npgsql DSN. Falls back to in-memory if unset. |
 | `KREMEING_ROLE` | no | `all` | `api` (HTTP only), `poller` (HTTP + poller), `all` (both — local dev default) |
+| `KREMEING_DISCOVERY_REFRESH_INTERVAL` | no | `12` | Hours between discovery refreshes (positive number; e.g. `6` or `0.5`). Only the poller/`all` roles refresh. |
 | `KREMEING_TEST_DATABASE_URL` | no | localhost peer | Used only by `Kremeing.Postgres.Tests`. |
 | `ASPNETCORE_URLS` | no | `http://localhost:5000` | Standard ASP.NET Core. |
 
@@ -194,7 +198,10 @@ git tag v0.2.0 && git push origin v0.2.0   # → ghcr.io/<owner>/kremeing:0.2.0
 - **Discovery via two-phase scrape.** Walk root → state pages on
   `site.krispykreme.com`, then resolve each `(city, state)` to
   `shopId`s via `api.krispykreme.com/shops/search`. ~150 API calls,
-  ~30 seconds, dedupes ~344 stores.
+  ~30 seconds, dedupes ~344 stores. Repeats on a timer (12h default) so
+  the registry self-heals; an empty/failed sweep never replaces a
+  good registry. `/health` reports the live store count and last refresh
+  time so a stuck-at-zero registry is observable, not silently green.
 
 See `k8s/README.md` for deployment-shape rationale.
 

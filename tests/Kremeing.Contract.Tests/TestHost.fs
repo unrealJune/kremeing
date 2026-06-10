@@ -84,4 +84,8 @@ module Stubs =
             // Push defaults to disabled in tests — the dedicated push
             // contract tests build their own deps with stubbed ports.
             Push = None
+            Health =
+                fun () ->
+                    { Stores = 0
+                      LastDiscoveryRefresh = epoch }
         }

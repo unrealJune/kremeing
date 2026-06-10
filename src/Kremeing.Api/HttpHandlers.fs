@@ -58,8 +58,23 @@ module HttpHandlers =
 
     // ──── /health ───────────────────────────────────────────────────────
 
-    let getHealth : HttpHandler =
-        json {| status = "ok" |}
+    /// Snapshot surfaced on /health so a stuck registry is observable.
+    /// `Stores` going (and staying) at 0 is exactly the condition that
+    /// silently persisted for 19 days; exposing it lets a probe or alert
+    /// catch it instead of /health reporting a bare "ok".
+    type HealthInfo = {
+        Stores: int
+        LastDiscoveryRefresh: DateTimeOffset
+    }
+
+    let getHealth (info: unit -> HealthInfo) : HttpHandler =
+        fun next ctx ->
+            let h = info ()
+            json
+                {| status = "ok"
+                   stores = h.Stores
+                   lastDiscoveryRefresh = h.LastDiscoveryRefresh |}
+                next ctx
 
     // ──── /openapi.yaml + /docs ─────────────────────────────────────────
 
@@ -587,6 +602,9 @@ module HttpHandlers =
         /// (no Postgres + VAPID config) — endpoints return 503 in
         /// that case and clients fall back to in-page polling.
         Push: PushDeps option
+        /// Liveness payload source: current registry size + last discovery
+        /// refresh time, surfaced on /health.
+        Health: unit -> HealthInfo
     }
 
     let webApp (deps: Deps) : HttpHandler =
@@ -595,7 +613,7 @@ module HttpHandlers =
         // Read-only endpoints over our own DB don't need it.
         let limited = rateLimit deps.ProxyRateLimit deps.Now
         choose [
-            GET >=> route "/health" >=> getHealth
+            GET >=> route "/health" >=> getHealth deps.Health
             GET >=> route "/openapi.yaml" >=> getOpenApi
             GET >=> route "/docs" >=> getDocs
             GET >=> route "/stores/nearby"

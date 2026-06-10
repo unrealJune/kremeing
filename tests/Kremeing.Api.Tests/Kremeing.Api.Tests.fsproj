@@ -12,6 +12,7 @@
     <Compile Include="DiscoveryTests.fs" />
     <Compile Include="ObservationsTests.fs" />
     <Compile Include="PollerTests.fs" />
+    <Compile Include="DiscoveryRefreshTests.fs" />
     <Compile Include="PushNotifyTests.fs" />
     <Compile Include="PollerNotifyTests.fs" />
   </ItemGroup>

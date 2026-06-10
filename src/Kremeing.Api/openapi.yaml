@@ -47,6 +47,20 @@ paths:
                   status:
                     type: string
                     enum: [ok]
+                  stores:
+                    type: integer
+                    description: |
+                      Number of stores in the current discovery registry.
+                      A value stuck at 0 indicates discovery failed and the
+                      poller has nothing to poll — alert on it.
+                    example: 345
+                  lastDiscoveryRefresh:
+                    type: string
+                    format: date-time
+                    description: |
+                      When the registry was last (re)published by discovery.
+                      Stale relative to the configured refresh interval means
+                      refreshes are failing.
 
   /stores/nearby:
     get:

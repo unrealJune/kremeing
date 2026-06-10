@@ -61,18 +61,20 @@ module Composition =
 
     let build
             (send: LiveApi.SendHttp)
-            (registry: Discovery.RegistryEntry list)
+            (registry: Registry.Holder)
             (observations: ObservationsAdapter)
             (push: PushFeature option)
             : ProductionDeps =
 
         // Lookup cityStateZip query for a given StoreId by walking the
-        // in-memory registry. O(n) per call is fine — n ≈ 400.
+        // current registry snapshot. O(n) per call is fine — n ≈ 400.
+        // Reading through the holder (not a captured list) means a periodic
+        // discovery refresh is immediately visible to the handlers too.
         let lookupQuery : StoreId -> Async<Result<string, StoreError>> =
             fun id ->
                 async {
                     let (StoreId sid) = id
-                    match registry |> List.tryFind (fun e -> e.ShopId = sid) with
+                    match registry.Get() |> List.tryFind (fun e -> e.ShopId = sid) with
                     | Some e -> return Ok e.SearchKey
                     | None -> return Error (StoreNotFound id)
                 }
@@ -118,6 +120,10 @@ module Composition =
             SearchCache = searchCache
             ProxyRateLimit = proxyRateLimit
             Push = push |> Option.map toPushHandlerDeps
+            Health =
+                fun () ->
+                    { Stores = registry.Count
+                      LastDiscoveryRefresh = registry.LastRefreshedAt }
         }
 
         let notifyFlipOn =
