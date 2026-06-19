@@ -15,6 +15,7 @@ import com.kremeing.auto.logic.LitStoreFilter
 import com.kremeing.auto.logic.NearbyStore
 import com.kremeing.auto.logic.NavigationIntent
 import com.kremeing.auto.prefs.SubscriptionPrefs
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 /**
@@ -26,12 +27,17 @@ import java.util.concurrent.Executors
  * All the "what shows and in what order" decisions live in `:logic`
  * ([LitStoreFilter], [CardFormatter], [NavigationIntent]) and are unit-tested
  * there; this class only binds those results into Car App templates.
+ *
+ * The [client], [prefs] and [executor] are injectable so the `:app` Robolectric
+ * suite can drive the screen with a network-free fake client and a synchronous
+ * executor (see HotLightScreenTest). Production code uses the defaults.
  */
-class HotLightScreen(carContext: CarContext) : Screen(carContext) {
-
-    private val io = Executors.newSingleThreadExecutor()
-    private val client = KremeingApiClient(BuildConfig.KREMEING_BASE_URL)
-    private val prefs = SubscriptionPrefs(carContext)
+class HotLightScreen @JvmOverloads constructor(
+    carContext: CarContext,
+    private val client: KremeingApiClient = KremeingApiClient(BuildConfig.KREMEING_BASE_URL),
+    private val prefs: SubscriptionPrefs = SubscriptionPrefs(carContext),
+    private val executor: Executor = Executors.newSingleThreadExecutor(),
+) : Screen(carContext) {
 
     @Volatile private var litStores: List<NearbyStore> = emptyList()
     @Volatile private var loading: Boolean = true
@@ -41,12 +47,12 @@ class HotLightScreen(carContext: CarContext) : Screen(carContext) {
         refresh()
     }
 
-    private fun refresh() {
+    internal fun refresh() {
         loading = true
         errorText = null
         invalidate()
         val (lat, lng) = prefs.lastLocation ?: DEFAULT_LOCATION
-        io.execute {
+        executor.execute {
             try {
                 val stores = client.nearbyStores(lat, lng, prefs.radiusMiles)
                 litStores = LitStoreFilter.litNearby(stores)
@@ -96,7 +102,7 @@ class HotLightScreen(carContext: CarContext) : Screen(carContext) {
             .setBrowsable(true)
             .build()
 
-    private fun navigateTo(store: NearbyStore) {
+    internal fun navigateTo(store: NearbyStore) {
         val uri = Uri.parse(NavigationIntent.geoUri(store))
         val intent = android.content.Intent(CarContext.ACTION_NAVIGATE, uri)
         carContext.startCarApp(intent)

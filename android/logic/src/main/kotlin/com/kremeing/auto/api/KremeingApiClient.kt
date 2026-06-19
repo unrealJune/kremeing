@@ -17,11 +17,15 @@ import java.net.URLEncoder
  *
  * All calls are blocking and must be invoked off the main thread (the car
  * screen and messaging service already run them on background executors).
+ *
+ * The class and its endpoint methods are `open` so tests (notably the `:app`
+ * Robolectric suite) can subclass it with a network-free fake instead of
+ * standing up a real HTTP server.
  */
-class KremeingApiClient(private val baseUrl: String) {
+open class KremeingApiClient(private val baseUrl: String) {
 
     /** Fetch lit-or-not stores near a coordinate within [radiusMiles]. */
-    fun nearbyStores(
+    open fun nearbyStores(
         latitude: Double,
         longitude: Double,
         radiusMiles: Double,
@@ -32,7 +36,7 @@ class KremeingApiClient(private val baseUrl: String) {
     }
 
     /** Register (or refresh) this device's location-based push subscription. */
-    fun subscribeDevice(
+    open fun subscribeDevice(
         token: String,
         latitude: Double,
         longitude: Double,
@@ -50,7 +54,7 @@ class KremeingApiClient(private val baseUrl: String) {
     }
 
     /** Remove this device's push subscription (e.g. on token rotation/logout). */
-    fun unsubscribeDevice(token: String) {
+    open fun unsubscribeDevice(token: String) {
         send("DELETE", "/device-subscriptions", ApiCodec.encodeUnsubscribe(DeviceUnsubscribeRequest(token)))
     }
 

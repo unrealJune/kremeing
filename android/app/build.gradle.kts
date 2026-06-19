@@ -15,6 +15,8 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
         // Base URL of the Kremeing backend the app polls and subscribes against.
         // Overridable per build without touching code.
         buildConfigField(
@@ -36,6 +38,16 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    // Layer 1 (Robolectric) runs the Android-framework UX tests on the JVM with
+    // no emulator. includeAndroidResources lets Robolectric read resources
+    // (e.g. notification channel strings) the way the device would.
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            isReturnDefaultValues = true
+        }
     }
 
     compileOptions {
@@ -66,10 +78,18 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
-    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-}
+    // Layer 1 — Robolectric JVM tests of the Android Auto UX, notifications and
+    // the companion activity. androidx.car.app:app-testing provides the
+    // ScreenController / TestCarContext used to drive the car screen.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("androidx.car.app:app-testing:1.4.0")
 
-tasks.withType<Test> {
-    useJUnitPlatform()
+    // Layer 2 — thin on-emulator Espresso smoke test (opt-in CI job).
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

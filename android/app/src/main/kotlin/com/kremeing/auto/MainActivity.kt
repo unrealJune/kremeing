@@ -17,6 +17,7 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.kremeing.auto.api.KremeingApiClient
 import com.kremeing.auto.messaging.HotLightNotifier
 import com.kremeing.auto.prefs.SubscriptionPrefs
+import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 /**
@@ -27,9 +28,27 @@ import java.util.concurrent.Executors
  */
 class MainActivity : AppCompatActivity() {
 
-    private val io = Executors.newSingleThreadExecutor()
     private val prefs by lazy { SubscriptionPrefs(this) }
     private lateinit var statusView: TextView
+
+    // Injectable seams so the Robolectric/Espresso suites can drive the
+    // permission -> token -> subscribe flow without Firebase or the network.
+    // Production code uses the defaults below.
+    internal var executor: Executor = Executors.newSingleThreadExecutor()
+    internal var apiClientFactory: (String) -> KremeingApiClient = { KremeingApiClient(it) }
+    internal var fetchToken: ((String?) -> Unit) -> Unit = { callback ->
+        // Tolerate a missing google-services.json (the app compiles and runs
+        // without it): if Firebase can't initialize, report no token rather
+        // than crashing the activity.
+        try {
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                callback(if (task.isSuccessful) task.result else null)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "FCM token unavailable", e)
+            callback(null)
+        }
+    }
 
     private val permissionLauncher =
         registerForActivityResult(
@@ -71,17 +90,16 @@ class MainActivity : AppCompatActivity() {
         val location = lastKnownLocation()
         if (location != null) prefs.lastLocation = location
 
-        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-            if (!task.isSuccessful) {
+        fetchToken { token ->
+            if (token == null) {
                 setStatus("Couldn't get a push token")
-                return@addOnCompleteListener
+                return@fetchToken
             }
-            val token = task.result
             prefs.token = token
             val (lat, lng) = prefs.lastLocation ?: DEFAULT_LOCATION
-            io.execute {
+            executor.execute {
                 try {
-                    KremeingApiClient(BuildConfig.KREMEING_BASE_URL)
+                    apiClientFactory(BuildConfig.KREMEING_BASE_URL)
                         .subscribeDevice(token, lat, lng, prefs.radiusMiles)
                     runOnUiThread {
                         setStatus("Subscribed — you'll be alerted when a nearby hot light turns on.")

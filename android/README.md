@@ -53,6 +53,29 @@ The `:app` module is a thin shell that binds these into Android components
 `:logic`. Building `:app` also needs an Android SDK (set `ANDROID_SDK_ROOT` or a
 `local.properties` with `sdk.dir=...`).
 
+### Test layers
+
+The tests are layered so the fast, deterministic ones run everywhere and the
+slow/flaky ones stay opt-in:
+
+| Layer | What it covers | How to run | CI job |
+|---|---|---|---|
+| **`:logic` unit tests** | All decision logic (filtering, formatting, `geo:` URIs, FCM parsing, API codec) | `./gradlew :logic:test` | `android-logic` (always) |
+| **Layer 1 — Robolectric UX** | The `:app` shell on the JVM: car screen template (`HotLightScreen`), notifications (`HotLightNotifier`/`KremeingMessagingService`), and the companion `MainActivity` flow | `./gradlew :app:testDebugUnitTest -PbuildAndroidApp=true` | `android-app` (always) |
+| **Layer 2 — Espresso smoke** | A thin on-emulator launch check for `MainActivity` | `./gradlew :app:connectedDebugAndroidTest -PbuildAndroidApp=true` | `android-instrumented` (manual `workflow_dispatch`, non-blocking) |
+
+Layer 1 uses `androidx.car.app:app-testing` (`ScreenController` /
+`TestCarContext`) to drive the Android Auto screen and assert the rendered
+templates and the navigation intent — the deterministic heart of the car UX —
+without an emulator. To keep the shell testable, `HotLightScreen` and
+`MainActivity` take their `KremeingApiClient`, executor and (for the activity)
+FCM-token source as injectable seams that default to the real implementations.
+
+> **Android Auto host UX** (the rendering inside the car head unit) can't be
+> driven by Espresso; validate it manually with the
+> [Desktop Head Unit (DHU)](https://developer.android.com/training/cars/testing/dhu).
+> Template correctness itself is covered by Layer 1.
+
 ### Backend base URL
 
 The app reads `BuildConfig.KREMEING_BASE_URL`, overridable at build time with
