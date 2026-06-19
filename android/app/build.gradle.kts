@@ -1,17 +1,17 @@
 plugins {
-    // AGP is pinned to 8.1.x because the Kotlin Gradle plugin version used by
-    // this project (1.9.24, declared in the root build) only supports AGP up to
-    // 8.1. Newer AGP (e.g. 8.6) makes `org.jetbrains.kotlin.android` fail to
-    // apply with "Could not generate a decorated class for type
-    // KotlinAndroidTarget ... com/android/build/gradle/api/BaseVariant".
+    // AGP and the Kotlin plugins are declared together here, with versions, so
+    // they load on THIS module's classpath. Applying org.jetbrains.kotlin.android
+    // needs AGP's classes (e.g. com.android.build.gradle.api.BaseVariant) on the
+    // same classpath; that only holds when AGP and Kotlin are requested together
+    // in this block (the root build deliberately puts neither on a shared
+    // classpath — see android/build.gradle.kts).
+    //
+    // AGP is pinned to 8.1.x because the Kotlin version used here (1.9.24) only
+    // supports AGP up to 8.1; newer AGP makes kotlin.android fail to apply with
+    // "Could not generate a decorated class for type KotlinAndroidTarget".
     id("com.android.application") version "8.1.4"
-    // The Kotlin Gradle plugin (shared by kotlin-android and kotlin-jvm) is
-    // already on the build classpath because the root build declares
-    // `kotlin("jvm") version "1.9.24"`. Re-declaring a version here fails with
-    // "the plugin is already on the classpath with an unknown version", so the
-    // Kotlin plugins are applied without a version and inherit the root's.
-    id("org.jetbrains.kotlin.android")
-    kotlin("plugin.serialization")
+    id("org.jetbrains.kotlin.android") version "1.9.24"
+    kotlin("plugin.serialization") version "1.9.24"
 }
 
 android {

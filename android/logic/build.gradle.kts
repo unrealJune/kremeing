@@ -1,6 +1,9 @@
 plugins {
-    kotlin("jvm")
-    kotlin("plugin.serialization")
+    // Versions are declared here (not inherited from the root build) so that the
+    // Kotlin Gradle plugin is loaded on this module's own classpath. See the
+    // root build.gradle.kts for why plugins are declared per-module.
+    kotlin("jvm") version "1.9.24"
+    kotlin("plugin.serialization") version "1.9.24"
 }
 
 dependencies {
