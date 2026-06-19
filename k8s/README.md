@@ -43,6 +43,11 @@ cp k8s/10-database-secret.example.yaml k8s/10-database-secret.yaml
 kubectl apply -f k8s/00-namespace.yaml
 kubectl apply -f k8s/10-database-secret.yaml
 kubectl apply -f k8s/20-postgres.yaml         # skip if using managed PG
+# Optional: enable push (Web Push + Android Auto/FCM). Create the secret,
+# then uncomment the matching env blocks in 30-api.yaml and 40-poller.yaml.
+cp k8s/25-push-secret.example.yaml k8s/25-push-secret.yaml
+# … edit CHANGEME values, then …
+kubectl apply -f k8s/25-push-secret.yaml      # optional
 kubectl apply -f k8s/30-api.yaml
 kubectl apply -f k8s/40-poller.yaml
 kubectl apply -f k8s/50-ingress.example.yaml  # optional

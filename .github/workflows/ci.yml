@@ -95,6 +95,34 @@ jobs:
             -schema-location default \
             "${files[@]}"
 
+  android-logic:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # The :logic module is pure Kotlin/JVM (no Android SDK needed) and holds
+      # all the app's decision logic + its JUnit suite. :app is intentionally
+      # not included here (opt-in via -PbuildAndroidApp; needs the Android SDK
+      # and Google Maven).
+      - name: Test Android logic
+        working-directory: android
+        run: ./gradlew :logic:test --no-daemon --console=plain
+
+      - name: Upload Android logic test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-logic-test-results
+          path: android/logic/build/reports/tests/test
+
   image:
     runs-on: ubuntu-latest
     steps:
