@@ -1,6 +1,5 @@
 package com.kremeing.auto.messaging
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -49,7 +48,7 @@ class HotLightNotifierTest {
         assertEquals(notif.title, shadowOf(posted).contentTitle.toString())
         assertEquals(notif.body, shadowOf(posted).contentText.toString())
 
-        val channel = shadow.getNotificationChannel(HotLightNotifier.CHANNEL_ID) as NotificationChannel
+        val channel = nm.getNotificationChannel(HotLightNotifier.CHANNEL_ID)
         assertEquals(NotificationManager.IMPORTANCE_HIGH, channel.importance)
     }
 
