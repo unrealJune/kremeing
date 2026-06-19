@@ -1,5 +1,10 @@
 plugins {
-    id("com.android.application") version "8.6.1"
+    // AGP is pinned to 8.1.x because the Kotlin Gradle plugin version used by
+    // this project (1.9.24, declared in the root build) only supports AGP up to
+    // 8.1. Newer AGP (e.g. 8.6) makes `org.jetbrains.kotlin.android` fail to
+    // apply with "Could not generate a decorated class for type
+    // KotlinAndroidTarget ... com/android/build/gradle/api/BaseVariant".
+    id("com.android.application") version "8.1.4"
     // The Kotlin Gradle plugin (shared by kotlin-android and kotlin-jvm) is
     // already on the build classpath because the root build declares
     // `kotlin("jvm") version "1.9.24"`. Re-declaring a version here fails with
