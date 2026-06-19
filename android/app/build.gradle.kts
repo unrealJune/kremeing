@@ -1,7 +1,12 @@
 plugins {
     id("com.android.application") version "8.6.1"
-    id("org.jetbrains.kotlin.android") version "1.9.24"
-    kotlin("plugin.serialization") version "1.9.24"
+    // The Kotlin Gradle plugin (shared by kotlin-android and kotlin-jvm) is
+    // already on the build classpath because the root build declares
+    // `kotlin("jvm") version "1.9.24"`. Re-declaring a version here fails with
+    // "the plugin is already on the classpath with an unknown version", so the
+    // Kotlin plugins are applied without a version and inherit the root's.
+    id("org.jetbrains.kotlin.android")
+    kotlin("plugin.serialization")
 }
 
 android {
