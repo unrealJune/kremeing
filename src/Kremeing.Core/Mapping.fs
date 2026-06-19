@@ -14,6 +14,12 @@ module Mapping =
         | Off -> StatusValues.Off
         | Unknown -> StatusValues.Unknown
 
+    /// Wire string for a native push platform. Exhaustive, so adding a
+    /// platform forces a decision here and in the parser.
+    let platformToWire (platform: DevicePlatform) : string =
+        match platform with
+        | Android -> "android"
+
     let storeIdValue (StoreId raw) = raw
 
     let storeToDto (store: Store) : StoreDto = {

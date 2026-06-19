@@ -99,3 +99,69 @@ module InMemoryObservations =
         static member Empty () = Store()
 
     let create () = Store.Empty()
+
+/// In-memory device-push subscription store. Used when native push is
+/// configured but no Postgres is available (e.g. local Android dev), and
+/// as a fast, dependency-free target for tests. Idempotent on the FCM
+/// token: re-registering the same token refreshes its location/radius.
+module InMemoryDeviceSubscriptions =
+
+    [<NoEquality; NoComparison>]
+    type private Row = {
+        Id: int64
+        Registration: DevicePushRegistration
+        CreatedAt: DateTimeOffset
+    }
+
+    type Store private () =
+        // Keyed by token so a re-registration upserts in place.
+        let rows = ConcurrentDictionary<string, Row>()
+        let mutable nextId = 0L
+        let gate = obj ()
+
+        member _.Subscribe : Ports.SubscribeDevicePush =
+            fun registration ->
+                async {
+                    let row =
+                        lock gate (fun () ->
+                            match rows.TryGetValue registration.Token with
+                            | true, existing ->
+                                let updated =
+                                    { existing with Registration = registration }
+                                rows.[registration.Token] <- updated
+                                updated
+                            | false, _ ->
+                                nextId <- nextId + 1L
+                                let row =
+                                    { Id = nextId
+                                      Registration = registration
+                                      CreatedAt = DateTimeOffset.UtcNow }
+                                rows.[registration.Token] <- row
+                                row)
+                    return Ok (DevicePushSubscriptionId row.Id)
+                }
+
+        member _.Unsubscribe : Ports.UnsubscribeDevicePush =
+            fun token ->
+                async {
+                    rows.TryRemove token |> ignore
+                    return Ok ()
+                }
+
+        member _.GetAll : Ports.GetAllDevicePushSubscriptions =
+            fun () ->
+                async {
+                    let all =
+                        rows.Values
+                        |> Seq.sortBy (fun r -> r.Id)
+                        |> Seq.map (fun r ->
+                            { Id = DevicePushSubscriptionId r.Id
+                              Registration = r.Registration
+                              CreatedAt = r.CreatedAt } : StoredDevicePushSubscription)
+                        |> List.ofSeq
+                    return Ok all
+                }
+
+        static member Empty () = Store()
+
+    let create () = Store.Empty()

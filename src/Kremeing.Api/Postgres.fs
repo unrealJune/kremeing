@@ -52,6 +52,16 @@ module Postgres =
 
         CREATE INDEX IF NOT EXISTS push_subs_by_endpoint
             ON push_subscriptions (endpoint);
+
+        CREATE TABLE IF NOT EXISTS device_push_subscriptions (
+            id           BIGSERIAL PRIMARY KEY,
+            token        TEXT NOT NULL UNIQUE,
+            platform     TEXT NOT NULL,
+            latitude     DOUBLE PRECISION NOT NULL,
+            longitude    DOUBLE PRECISION NOT NULL,
+            radius_miles DOUBLE PRECISION NOT NULL,
+            created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
     """
 
     /// Idempotent migration. Run on startup; safe to re-run.
@@ -428,3 +438,96 @@ module Postgres =
 
     let createPushSubscriptions (connectionString: string) =
         PushSubscriptionsStore(connectionString)
+
+    /// Postgres-backed device (FCM) push subscription store. Keyed on the
+    /// FCM token: re-registering UPSERTs the location/radius/platform so a
+    /// device that moved or widened its radius doesn't leave a stale row.
+    type DevicePushSubscriptionsStore(connectionString: string) =
+
+        member _.Subscribe : Ports.SubscribeDevicePush =
+            fun reg ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        use cmd =
+                            new NpgsqlCommand(
+                                "INSERT INTO device_push_subscriptions \
+                                   (token, platform, latitude, longitude, radius_miles) \
+                                 VALUES (@token, @platform, @lat, @lng, @radius) \
+                                 ON CONFLICT (token) DO UPDATE \
+                                   SET platform     = EXCLUDED.platform, \
+                                       latitude     = EXCLUDED.latitude, \
+                                       longitude    = EXCLUDED.longitude, \
+                                       radius_miles = EXCLUDED.radius_miles \
+                                 RETURNING id",
+                                conn)
+                        addParam cmd "token"    reg.Token
+                        addParam cmd "platform" (Mapping.platformToWire reg.Platform)
+                        addParam cmd "lat"      reg.Location.Latitude
+                        addParam cmd "lng"      reg.Location.Longitude
+                        addParam cmd "radius"   reg.RadiusMiles
+                        let! result = cmd.ExecuteScalarAsync()
+                        let id = downcast result : int64
+                        return DevicePushSubscriptionId id
+                    }
+                guard work
+
+        member _.Unsubscribe : Ports.UnsubscribeDevicePush =
+            fun token ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        use cmd =
+                            new NpgsqlCommand(
+                                "DELETE FROM device_push_subscriptions WHERE token = @token",
+                                conn)
+                        addParam cmd "token" token
+                        let! _ = cmd.ExecuteNonQueryAsync()
+                        return ()
+                    }
+                guard work
+
+        member _.GetAll : Ports.GetAllDevicePushSubscriptions =
+            fun () ->
+                let work =
+                    task {
+                        use conn = new NpgsqlConnection(connectionString)
+                        do! conn.OpenAsync()
+                        use cmd =
+                            new NpgsqlCommand(
+                                "SELECT id, token, platform, latitude, longitude, \
+                                        radius_miles, created_at \
+                                 FROM device_push_subscriptions \
+                                 ORDER BY created_at ASC",
+                                conn)
+                        use! reader = cmd.ExecuteReaderAsync()
+                        let result = ResizeArray<StoredDevicePushSubscription>()
+                        let mutable hasNext = true
+                        while hasNext do
+                            let! r = reader.ReadAsync()
+                            hasNext <- r
+                            if hasNext then
+                                let platform =
+                                    Validation.parseDevicePlatform (reader.GetString 2)
+                                    |> Option.defaultValue Android
+                                result.Add {
+                                    Id = DevicePushSubscriptionId (reader.GetInt64 0)
+                                    Registration = {
+                                        Token = reader.GetString 1
+                                        Platform = platform
+                                        Location = {
+                                            Latitude  = reader.GetDouble 3
+                                            Longitude = reader.GetDouble 4
+                                        }
+                                        RadiusMiles = reader.GetDouble 5
+                                    }
+                                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(6)
+                                }
+                        return List.ofSeq result
+                    }
+                guard work
+
+    let createDevicePushSubscriptions (connectionString: string) =
+        DevicePushSubscriptionsStore(connectionString)

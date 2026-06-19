@@ -10,6 +10,7 @@
     <Compile Include="PostgresFixture.fs" />
     <Compile Include="PostgresObservationsTests.fs" />
     <Compile Include="PostgresPushSubscriptionsTests.fs" />
+    <Compile Include="PostgresDevicePushSubscriptionsTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

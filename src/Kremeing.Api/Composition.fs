@@ -48,6 +48,22 @@ module Composition =
         VapidPublicKey = feat.Vapid.PublicKey
     }
 
+    /// Native device (FCM) push feature. Storage-agnostic: holds the
+    /// subscription ports as plain functions so either the Postgres or
+    /// in-memory device store can back it. `None` disables native push
+    /// (endpoints 503; poller skips device fan-out).
+    type DevicePushFeature = {
+        Subscribe: Ports.SubscribeDevicePush
+        Unsubscribe: Ports.UnsubscribeDevicePush
+        GetAll: Ports.GetAllDevicePushSubscriptions
+        Dispatch: DevicePushDispatch.Dispatch
+    }
+
+    let private toDevicePushHandlerDeps (feat: DevicePushFeature) : HttpHandlers.DevicePushDeps = {
+        Subscribe = feat.Subscribe
+        Unsubscribe = feat.Unsubscribe
+    }
+
     /// Production dependencies the host wires into Giraffe + Hosted services.
     type ProductionDeps = {
         Handlers: HttpHandlers.Deps
@@ -64,6 +80,7 @@ module Composition =
             (registry: Registry.Holder)
             (observations: ObservationsAdapter)
             (push: PushFeature option)
+            (devicePush: DevicePushFeature option)
             : ProductionDeps =
 
         // Lookup cityStateZip query for a given StoreId by walking the
@@ -120,13 +137,14 @@ module Composition =
             SearchCache = searchCache
             ProxyRateLimit = proxyRateLimit
             Push = push |> Option.map toPushHandlerDeps
+            DevicePush = devicePush |> Option.map toDevicePushHandlerDeps
             Health =
                 fun () ->
                     { Stores = registry.Count
                       LastDiscoveryRefresh = registry.LastRefreshedAt }
         }
 
-        let notifyFlipOn =
+        let webNotifyFlipOn =
             match push with
             | None -> PushNotify.noop
             | Some feat ->
@@ -134,6 +152,20 @@ module Composition =
                     feat.Subscriptions.FindForStore
                     feat.Subscriptions.DeleteByEndpoint
                     feat.Dispatch
+
+        let deviceNotifyFlipOn =
+            match devicePush with
+            | None -> DevicePushNotify.noop
+            | Some feat ->
+                DevicePushNotify.notifyFlipOn
+                    feat.GetAll
+                    feat.Unsubscribe
+                    feat.Dispatch
+
+        // One hook for the poller drives both transports; the poller
+        // never learns either exists.
+        let notifyFlipOn =
+            DevicePushNotify.combine webNotifyFlipOn deviceNotifyFlipOn
 
         { Handlers = handlers
           Record = observations.Record

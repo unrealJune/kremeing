@@ -153,6 +153,54 @@ let private buildPushFeature
              will return 503", why)
         None
 
+/// Native device push (FCM) requires an FCM project id. Storage uses
+/// Postgres when available, else an in-memory store (fine for local
+/// Android dev; subscriptions are lost on restart). The OAuth2 bearer
+/// for the FCM v1 API is read from `KREMEING_FCM_ACCESS_TOKEN` — supply
+/// it from a service-account token refresher/sidecar. Missing project
+/// id → native push disabled cleanly (/device-subscriptions return 503).
+let private buildDevicePushFeature
+        (logger: ILogger)
+        (postgresCs: string option)
+        (httpClient: HttpClient)
+        : Composition.DevicePushFeature option =
+    match Environment.GetEnvironmentVariable "KREMEING_FCM_PROJECT_ID" with
+    | NotNullOrWhitespace projectId ->
+        let subscribe, unsubscribe, getAll =
+            match postgresCs with
+            | Some cs ->
+                let store = Postgres.createDevicePushSubscriptions cs
+                store.Subscribe, store.Unsubscribe, store.GetAll
+            | None ->
+                logger.LogWarning(
+                    "Native push enabled without Postgres; device subscriptions \
+                     are in-memory and lost on restart.")
+                let store = InMemoryDeviceSubscriptions.create ()
+                store.Subscribe, store.Unsubscribe, store.GetAll
+        let fcm : DevicePushDispatch.Fcm =
+            { ProjectId = projectId
+              AccessToken =
+                fun () ->
+                    async {
+                        return
+                            Environment.GetEnvironmentVariable "KREMEING_FCM_ACCESS_TOKEN"
+                            |> Option.ofObj
+                            |> Option.defaultValue ""
+                    } }
+        logger.LogInformation(
+            "Native device push enabled (FCM project {project}).", projectId)
+        Some {
+            Subscribe = subscribe
+            Unsubscribe = unsubscribe
+            GetAll = getAll
+            Dispatch = DevicePushDispatch.create fcm httpClient
+        }
+    | _ ->
+        logger.LogWarning(
+            "Native device push disabled (KREMEING_FCM_PROJECT_ID missing); \
+             /device-subscriptions endpoints will return 503")
+        None
+
 /// Resolves the periodic discovery-refresh interval. Defaults to 12h
 /// (twice daily); `KREMEING_DISCOVERY_REFRESH_INTERVAL` overrides it with a
 /// positive number of hours (e.g. "6" or "0.5"). Invalid values fall back
@@ -197,13 +245,14 @@ let main args =
 
     let observations, postgresCs = buildObservations logger
     let push = buildPushFeature logger postgresCs
+    let devicePush = buildDevicePushFeature logger postgresCs httpClient
     let search key = LiveApi.searchByCityState send key
     let registry = discoverRegistry logger send search
     // Shared, mutable registry: startup seeds it; the periodic refresh
     // swaps it. Both the poller and the read handlers read through the
     // holder so a refresh is visible everywhere at once.
     let registryHolder = Registry.Holder(registry, DateTimeOffset.UtcNow)
-    let deps = Composition.build send registryHolder observations push
+    let deps = Composition.build send registryHolder observations push devicePush
 
     // Poller + discovery refresh are gated by role — only one deployment
     // runs them, so multiple API replicas don't multiply our upstream load.

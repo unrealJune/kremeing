@@ -63,3 +63,22 @@ module Ports =
     /// starting in 'idle'.
     type FindSubscribedStoresByEndpoint =
         string -> Async<Result<StoreId list, StoreError>>
+
+    // ──── native device push (FCM) ───────────────────────────────────────
+
+    /// Idempotent subscribe for a native device. Same `Token` refreshes
+    /// the stored location/radius rather than creating a duplicate row,
+    /// so a device that moved (or widened its radius) just re-registers.
+    type SubscribeDevicePush =
+        DevicePushRegistration -> Async<Result<DevicePushSubscriptionId, StoreError>>
+
+    /// User-initiated (or token-rotation) unsubscribe: drops the row
+    /// matching the FCM token. Idempotent; missing rows succeed.
+    type UnsubscribeDevicePush =
+        string -> Async<Result<unit, StoreError>>
+
+    /// Used by the poller-side device dispatcher when an On-flip lands:
+    /// returns every active device subscription so the fan-out can keep
+    /// only those whose (location, radius) contains the flipped store.
+    type GetAllDevicePushSubscriptions =
+        unit -> Async<Result<StoredDevicePushSubscription list, StoreError>>

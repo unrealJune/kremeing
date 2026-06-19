@@ -308,6 +308,53 @@ paths:
         '503':
           $ref: '#/components/responses/PushDisabled'
 
+  /device-subscriptions:
+    post:
+      tags: [push]
+      summary: Register a native device (FCM) for nearby hot-light alerts
+      description: |
+        Used by the Android Auto companion app. The device asks to be
+        notified whenever a store within `radiusMiles` of its
+        (`latitude`, `longitude`) flips its hot light on. Idempotent on
+        the FCM `token`: re-posting refreshes the stored location/radius
+        (handles the device moving or rotating its token).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceSubscribeRequest'
+      responses:
+        '201':
+          description: Device registered (or refreshed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceSubscribeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/PushDisabled'
+    delete:
+      tags: [push]
+      summary: Unregister a native device
+      description: |
+        Removes the row matching the FCM `token`. Idempotent — a missing
+        token is treated as a successful no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceUnsubscribeRequest'
+      responses:
+        '204':
+          description: Device removed (or already absent).
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          $ref: '#/components/responses/PushDisabled'
+
   /stores/{id}/uptime:
     get:
       tags: [history]
@@ -519,6 +566,38 @@ components:
         storeId:  { type: integer, minimum: 1 }
         endpoint: { type: string, format: uri }
 
+    DeviceSubscribeRequest:
+      type: object
+      required: [token, platform, latitude, longitude, radiusMiles]
+      properties:
+        token:
+          type: string
+          description: FCM registration token identifying this device install.
+        platform:
+          type: string
+          enum: [android]
+        latitude:    { type: number, format: double, minimum: -90,  maximum: 90 }
+        longitude:   { type: number, format: double, minimum: -180, maximum: 180 }
+        radiusMiles:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 100
+          description: Notify about hot-light flips within this many miles of the point.
+
+    DeviceSubscribeResponse:
+      type: object
+      required: [id, radiusMiles]
+      properties:
+        id:          { type: integer, format: int64 }
+        radiusMiles: { type: number,  format: double }
+
+    DeviceUnsubscribeRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string }
+
     HotLightFlip:
       type: object
       required: [storeId, status, observedAt]
@@ -590,6 +669,7 @@ components:
             - rate_limited
             - push_disabled
             - invalid_subscription
+            - invalid_device_subscription
             - not_found
           description: Stable machine-readable error code.
         message:

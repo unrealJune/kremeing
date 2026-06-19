@@ -157,6 +157,31 @@ module Api =
         storeIds: int[]
     }
 
+    // ──── native device push (FCM) ──────────────────────────────────────
+
+    /// Registration payload from a native device (e.g. the Android Auto
+    /// companion app). The device asks to be notified about hot-light
+    /// flips within `radiusMiles` of (`latitude`, `longitude`).
+    [<CLIMutable>]
+    type DeviceSubscribeRequestDto = {
+        token: string
+        platform: string
+        latitude: float
+        longitude: float
+        radiusMiles: float
+    }
+
+    [<CLIMutable>]
+    type DeviceSubscribeResponseDto = {
+        id: int64
+        radiusMiles: float
+    }
+
+    [<CLIMutable>]
+    type DeviceUnsubscribeRequestDto = {
+        token: string
+    }
+
     module BucketSizes =
         [<Literal>]
         let Hour = "hour"
@@ -178,6 +203,8 @@ module Api =
         let PushDisabled = "push_disabled"
         [<Literal>]
         let InvalidSubscription = "invalid_subscription"
+        [<Literal>]
+        let InvalidDeviceSubscription = "invalid_device_subscription"
 
     module StatusValues =
         [<Literal>]

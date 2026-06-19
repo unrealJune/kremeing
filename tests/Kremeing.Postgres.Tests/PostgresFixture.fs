@@ -45,7 +45,8 @@ type PostgresFixture() =
             use conn = new NpgsqlConnection(this.ConnectionString)
             do! conn.OpenAsync()
             use cmd = new NpgsqlCommand(
-                        "TRUNCATE TABLE flip_events, store_status, push_subscriptions \
+                        "TRUNCATE TABLE flip_events, store_status, push_subscriptions, \
+                                        device_push_subscriptions \
                          RESTART IDENTITY",
                         conn)
             let! _ = cmd.ExecuteNonQueryAsync()

@@ -14,6 +14,9 @@
     <Compile Include="PollerTests.fs" />
     <Compile Include="DiscoveryRefreshTests.fs" />
     <Compile Include="PushNotifyTests.fs" />
+    <Compile Include="DevicePushNotifyTests.fs" />
+    <Compile Include="DevicePushDispatchTests.fs" />
+    <Compile Include="InMemoryDeviceSubscriptionsTests.fs" />
     <Compile Include="PollerNotifyTests.fs" />
   </ItemGroup>
 
