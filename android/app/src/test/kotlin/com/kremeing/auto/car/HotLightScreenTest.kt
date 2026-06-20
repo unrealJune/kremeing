@@ -119,9 +119,17 @@ class HotLightScreenTest {
     @Test
     fun `screen controller drives the screen to a ListTemplate`() {
         val client = FakeKremeingApiClient(stores = listOf(store(id = 1, status = "on")))
-        val controller = ScreenController(screen(client))
+        val screen = screen(client)
+        val controller = ScreenController(screen)
 
         controller.moveToState(Lifecycle.State.STARTED)
+        // The Car App test host only records a template when invalidate() is
+        // called while the screen is at least STARTED (see androidx's own
+        // ScreenControllerTest#getReturnedTemplates). The screen's constructor
+        // refresh() runs before the controller raises the lifecycle, so its
+        // invalidate() is a no-op; request a fresh template now that it has
+        // started.
+        screen.invalidate()
 
         assertTrue(controller.templatesReturned.last() is ListTemplate)
     }
