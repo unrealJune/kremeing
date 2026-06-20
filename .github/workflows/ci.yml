@@ -154,10 +154,14 @@ jobs:
   # Builds a sideloadable APK so you can install the app straight from a CI
   # run. assembleDebug signs with the standard Android debug keystore, so the
   # resulting app-debug.apk installs on any device/emulator without extra
-  # signing config. There's no google-services.json here, so Firebase/FCM push
-  # won't initialize at runtime — everything else (the Android Auto UX, polling
-  # KREMEING_BASE_URL) works. Download the "kremeing-app-debug-apk" artifact
-  # from the run's summary page and `adb install` it (or open it on-device).
+  # signing config. It's built with -PkremeingPushEnabled=false so it's a
+  # "notificationless" APK: since there's no google-services.json here,
+  # Firebase/FCM can't initialize and fetching a push token would otherwise
+  # fail with "Couldn't get a push token". With push disabled the companion
+  # screen skips the token/subscribe flow, and everything else (the Android
+  # Auto UX, polling KREMEING_BASE_URL) works. Download the
+  # "kremeing-app-debug-apk" artifact from the run's summary page and
+  # `adb install` it (or open it on-device).
   android-apk:
     runs-on: ubuntu-latest
     permissions:
@@ -173,7 +177,7 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug -PbuildAndroidApp=true --no-daemon --console=plain
+        run: ./gradlew :app:assembleDebug -PbuildAndroidApp=true -PkremeingPushEnabled=false --no-daemon --console=plain
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

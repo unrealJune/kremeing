@@ -77,4 +77,30 @@ class MainActivityTest {
         val nm = app.getSystemService(NotificationManager::class.java)
         assertTrue(shadowOf(nm).notificationChannels.isNotEmpty())
     }
+
+    @Test
+    fun `a notificationless build skips the token and subscription`() {
+        grantPermissions()
+        val fake = FakeKremeingApiClient()
+        var tokenFetched = false
+        val controller = Robolectric.buildActivity(MainActivity::class.java)
+        controller.get().apply {
+            executor = Executor { it.run() }
+            apiClientFactory = { fake }
+            pushEnabled = false
+            fetchToken = { callback ->
+                tokenFetched = true
+                callback("fake-token-123")
+            }
+        }
+
+        controller.setup()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // Push is off: no token fetch, no subscription, no notification channel.
+        assertTrue(!tokenFetched)
+        assertTrue(fake.subscribeCalls.isEmpty())
+        val nm = app.getSystemService(NotificationManager::class.java)
+        assertTrue(shadowOf(nm).notificationChannels.isEmpty())
+    }
 }

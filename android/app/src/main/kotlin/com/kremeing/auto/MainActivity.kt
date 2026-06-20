@@ -36,6 +36,10 @@ class MainActivity : AppCompatActivity() {
     // Production code uses the defaults below.
     internal var executor: Executor = Executors.newSingleThreadExecutor()
     internal var apiClientFactory: (String) -> KremeingApiClient = { KremeingApiClient(it) }
+    // Whether push/notifications are wired up. Defaults to the build flag so a
+    // notificationless APK (-PkremeingPushEnabled=false) skips the token fetch
+    // and subscription instead of failing with "Couldn't get a push token".
+    internal var pushEnabled: Boolean = BuildConfig.PUSH_ENABLED
     internal var fetchToken: ((String?) -> Unit) -> Unit = { callback ->
         // Tolerate a missing google-services.json (the app compiles and runs
         // without it): if Firebase can't initialize, report no token rather
@@ -57,7 +61,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        HotLightNotifier.ensureChannel(this)
+        if (pushEnabled) HotLightNotifier.ensureChannel(this)
 
         statusView = TextView(this).apply { textSize = 16f }
         val root = LinearLayout(this).apply {
@@ -77,7 +81,7 @@ class MainActivity : AppCompatActivity() {
     private fun requestPermissionsThenSubscribe() {
         val needed = buildList {
             add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (pushEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }.filter {
@@ -89,6 +93,13 @@ class MainActivity : AppCompatActivity() {
     private fun subscribe() {
         val location = lastKnownLocation()
         if (location != null) prefs.lastLocation = location
+
+        // Notificationless build: don't try to fetch an FCM token or subscribe.
+        // The Android Auto UX (which polls the backend) keeps working.
+        if (!pushEnabled) {
+            setStatus("Push notifications are disabled in this build.")
+            return
+        }
 
         fetchToken { token ->
             if (token == null) {
