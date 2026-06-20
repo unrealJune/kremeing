@@ -151,6 +151,37 @@ jobs:
           name: android-app-test-results
           path: android/app/build/reports/tests/testDebugUnitTest
 
+  # Builds a sideloadable APK so you can install the app straight from a CI
+  # run. assembleDebug signs with the standard Android debug keystore, so the
+  # resulting app-debug.apk installs on any device/emulator without extra
+  # signing config. There's no google-services.json here, so Firebase/FCM push
+  # won't initialize at runtime — everything else (the Android Auto UX, polling
+  # KREMEING_BASE_URL) works. Download the "kremeing-app-debug-apk" artifact
+  # from the run's summary page and `adb install` it (or open it on-device).
+  android-apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Assemble debug APK
+        working-directory: android
+        run: ./gradlew :app:assembleDebug -PbuildAndroidApp=true --no-daemon --console=plain
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kremeing-app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
   # Layer 2: the thin Espresso smoke test on a real emulator. It's slower and
   # flakier than the Robolectric suite, so it's opt-in (manual dispatch) and
   # non-blocking (continue-on-error) — it never gates the PR pipeline.
