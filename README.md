@@ -55,6 +55,9 @@ plus an OpenAPI 3.1 reference at `/docs`.
 | `GET /stores/{id}/hot-light` | Live status for one store |
 | `GET /stores/{id}/history?since=&until=` | Flip events in a time range |
 | `GET /stores/{id}/uptime?bucket=hour\|day&since=&until=` | Bucketed time-series for charting |
+| `GET /vapid-public-key` | Web Push VAPID public key for browser subscriptions |
+| `POST` / `DELETE /subscriptions` | Web Push (browser) per-store subscribe/unsubscribe |
+| `POST` / `DELETE /device-subscriptions` | Native (Android/FCM) location+radius subscribe/unsubscribe — powers the Android Auto app |
 
 `{id}` is Krispy Kreme's `shopId` (e.g. SODO Seattle = `899`).
 
@@ -102,14 +105,25 @@ KREMEING_TEST_DATABASE_URL="Host=...;Database=kremeing_test;Username=...;Passwor
   dotnet test
 ```
 
-131 tests across four projects:
+131 tests across four backend projects:
 
 | Project | Tests | What it verifies |
 |---|---:|---|
-| `Kremeing.Core.Tests` | 38 | Pure functions: validation, DTO mapping, uptime bucketing |
-| `Kremeing.Api.Tests` | 55 | LiveApi adapter, Discovery, in-memory observations, poller |
-| `Kremeing.Postgres.Tests` | 12 | Real-DB observations contract (mirrors in-memory) |
-| `Kremeing.Contract.Tests` | 26 | HTTP wire-level, including OpenAPI completeness |
+| `Kremeing.Core.Tests` | 76 | Pure functions: validation, DTO mapping, uptime bucketing, haversine geo, device-registration validation |
+| `Kremeing.Api.Tests` | 94 | LiveApi adapter, Discovery, in-memory observations, poller, web + device push notify/dispatch |
+| `Kremeing.Postgres.Tests` | 33 | Real-DB observations + web/device push subscription stores (mirror in-memory; skip without a DB) |
+| `Kremeing.Contract.Tests` | 72 | HTTP wire-level, including OpenAPI completeness |
+
+The Android Auto app's pure-Kotlin logic has its own JUnit suite (44 tests):
+
+```bash
+cd android && ./gradlew :logic:test    # no Android SDK required
+```
+
+It covers lit-store filtering, card text/distance formatting, `geo:` navigation
+URI building, FCM data-message parsing, flip detection, the JSON codec, and the
+backend HTTP client (against an in-process server). See
+[`android/README.md`](android/README.md).
 
 ## Project layout
 
@@ -125,7 +139,12 @@ kremeing/
 │       ├── Postgres.fs       Postgres-backed store (same surface)
 │       ├── Poller.fs         BackgroundService that ticks every 5 min
 │       ├── HttpHandlers.fs   Giraffe routes + DTOs
+│       ├── DevicePushDispatch.fs  FCM HTTP v1 send-side (data-only messages)
+│       ├── DevicePushNotify.fs    proximity fan-out on Off→On flips
 │       └── openapi.yaml      hand-written OpenAPI 3.1 spec
+├── android/                 Android Auto app — see android/README.md
+│   ├── logic/               pure-Kotlin/JVM logic + JUnit tests (builds anywhere)
+│   └── app/                 Android Auto shell: CarAppService, FCM service (opt-in build)
 ├── tests/
 │   ├── Kremeing.Core.Tests/
 │   ├── Kremeing.Api.Tests/
@@ -146,6 +165,11 @@ kremeing/
 | `KREMEING_DATABASE_URL` | recommended | — (in-memory) | URL or Npgsql DSN. Falls back to in-memory if unset. |
 | `KREMEING_ROLE` | no | `all` | `api` (HTTP only), `poller` (HTTP + poller), `all` (both — local dev default) |
 | `KREMEING_DISCOVERY_REFRESH_INTERVAL` | no | `12` | Hours between discovery refreshes (positive number; e.g. `6` or `0.5`). Only the poller/`all` roles refresh. |
+| `KREMEING_VAPID_PUBLIC_KEY` | no | — | Web Push (browser) VAPID public key. Push endpoints return `503 push_disabled` until set (with the private key + Postgres). |
+| `KREMEING_VAPID_PRIVATE_KEY` | no | — | Web Push VAPID private key. **Secret.** |
+| `KREMEING_VAPID_SUBJECT` | no | `mailto:` placeholder | Web Push VAPID subject (`mailto:` or origin URL). |
+| `KREMEING_FCM_PROJECT_ID` | no | — | Firebase project id. Enables native (Android) device push for the Android Auto app; `/device-subscriptions` returns `503 push_disabled` until set. |
+| `KREMEING_FCM_ACCESS_TOKEN` | no | — | OAuth2 bearer for FCM HTTP v1. **Secret.** Mint from a Firebase service account (short-lived; refresh via a sidecar/cron). Without it, subscriptions are still stored but sends are skipped. |
 | `KREMEING_TEST_DATABASE_URL` | no | localhost peer | Used only by `Kremeing.Postgres.Tests`. |
 | `ASPNETCORE_URLS` | no | `http://localhost:5000` | Standard ASP.NET Core. |
 

@@ -80,3 +80,34 @@ module Domain =
         Subscription: PushSubscription
         CreatedAt: DateTimeOffset
     }
+
+    /// Native (non-browser) push platforms we can target. The Android
+    /// Auto companion app registers an FCM token here. Modeled as a DU
+    /// so adding iOS/APNs later is a compile-time fan-out, not a string
+    /// soup.
+    type DevicePlatform =
+        | Android
+
+    /// A native device's request to be notified when *any* store near a
+    /// point lights up. Unlike `PushSubscription` (web push, scoped to a
+    /// single store), device subscriptions are location + radius based:
+    /// the Android Auto user cares about "lit stores near me", not one
+    /// specific shopId.
+    type DevicePushRegistration = {
+        /// FCM registration token identifying this device install. Unique
+        /// per install; rotates when the app clears data or reinstalls.
+        Token: string
+        Platform: DevicePlatform
+        /// Where the device is (or last reported). A hot-light flip within
+        /// `RadiusMiles` of this point triggers a push to this token.
+        Location: Coordinates
+        RadiusMiles: float
+    }
+
+    type DevicePushSubscriptionId = DevicePushSubscriptionId of int64
+
+    type StoredDevicePushSubscription = {
+        Id: DevicePushSubscriptionId
+        Registration: DevicePushRegistration
+        CreatedAt: DateTimeOffset
+    }

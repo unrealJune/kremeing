@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="Ports.fs" />
     <Compile Include="Validation.fs" />
+    <Compile Include="Geo.fs" />
     <Compile Include="Mapping.fs" />
     <Compile Include="Uptime.fs" />
     <Compile Include="Cache.fs" />

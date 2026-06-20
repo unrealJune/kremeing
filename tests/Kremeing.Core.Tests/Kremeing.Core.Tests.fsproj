@@ -7,6 +7,8 @@
 
   <ItemGroup>
     <Compile Include="ValidationTests.fs" />
+    <Compile Include="DeviceRegistrationValidationTests.fs" />
+    <Compile Include="GeoTests.fs" />
     <Compile Include="MappingTests.fs" />
     <Compile Include="UptimeTests.fs" />
     <Compile Include="CacheTests.fs" />

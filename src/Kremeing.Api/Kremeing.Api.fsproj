@@ -13,6 +13,8 @@
     <Compile Include="Postgres.fs" />
     <Compile Include="PushDispatch.fs" />
     <Compile Include="PushNotify.fs" />
+    <Compile Include="DevicePushDispatch.fs" />
+    <Compile Include="DevicePushNotify.fs" />
     <Compile Include="Poller.fs" />
     <Compile Include="DiscoveryRefresh.fs" />
     <Compile Include="HttpHandlers.fs" />

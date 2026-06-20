@@ -580,6 +580,68 @@ module HttpHandlers =
                             return! next ctx
             }
 
+    // ──── native device push (FCM) ──────────────────────────────────────
+
+    /// Subset of Deps the device-push endpoints need. `None` when native
+    /// push is unconfigured (no FCM project) — endpoints return 503
+    /// push_disabled, same contract as web push.
+    type DevicePushDeps = {
+        Subscribe: Ports.SubscribeDevicePush
+        Unsubscribe: Ports.UnsubscribeDevicePush
+    }
+
+    let postDeviceSubscription (push: DevicePushDeps option) : HttpHandler =
+        fun next ctx ->
+            task {
+                match push with
+                | None -> return! writePushDisabled next ctx
+                | Some p ->
+                    let! body = ctx.BindJsonAsync<DeviceSubscribeRequestDto>()
+                    if isNull (box body) then
+                        return! writeBadRequest ErrorCodes.InvalidDeviceSubscription
+                                    "a JSON body is required"
+                                    next ctx
+                    else
+                        match
+                            Validation.validateDeviceRegistration
+                                body.token body.platform
+                                body.latitude body.longitude body.radiusMiles
+                        with
+                        | Error msg ->
+                            return! writeBadRequest ErrorCodes.InvalidDeviceSubscription msg next ctx
+                        | Ok registration ->
+                            let! result = p.Subscribe registration
+                            match result with
+                            | Error err -> return! writeError err next ctx
+                            | Ok (DevicePushSubscriptionId id) ->
+                                ctx.SetStatusCode 201
+                                let response : DeviceSubscribeResponseDto =
+                                    { id = id; radiusMiles = registration.RadiusMiles }
+                                return! json response next ctx
+            }
+
+    let deleteDeviceSubscription (push: DevicePushDeps option) : HttpHandler =
+        fun next ctx ->
+            task {
+                match push with
+                | None -> return! writePushDisabled next ctx
+                | Some p ->
+                    let! body = ctx.BindJsonAsync<DeviceUnsubscribeRequestDto>()
+                    let bad = isNull (box body)
+                              || System.String.IsNullOrWhiteSpace body.token
+                    if bad then
+                        return! writeBadRequest ErrorCodes.InvalidDeviceSubscription
+                                    "token is required"
+                                    next ctx
+                    else
+                        let! result = p.Unsubscribe body.token
+                        match result with
+                        | Error err -> return! writeError err next ctx
+                        | Ok () ->
+                            ctx.SetStatusCode 204
+                            return! next ctx
+            }
+
     // ──── webApp ────────────────────────────────────────────────────────
 
     /// All HTTP dependencies the webApp needs, bundled. Building this
@@ -602,6 +664,9 @@ module HttpHandlers =
         /// (no Postgres + VAPID config) — endpoints return 503 in
         /// that case and clients fall back to in-page polling.
         Push: PushDeps option
+        /// Native device (FCM) push handlers. None when native push is
+        /// unconfigured (no FCM project) — endpoints return 503.
+        DevicePush: DevicePushDeps option
         /// Liveness payload source: current registry size + last discovery
         /// refresh time, surfaced on /health.
         Health: unit -> HealthInfo
@@ -633,6 +698,8 @@ module HttpHandlers =
             GET    >=> route "/subscriptions"    >=> getSubscriptionsByEndpoint deps.Push
             POST   >=> route "/subscriptions"    >=> postSubscription deps.Push
             DELETE >=> route "/subscriptions"    >=> deleteSubscription deps.Push
+            POST   >=> route "/device-subscriptions" >=> postDeviceSubscription deps.DevicePush
+            DELETE >=> route "/device-subscriptions" >=> deleteDeviceSubscription deps.DevicePush
             setStatusCode 404
                 >=> json { error = "not_found"; message = "Route not found." }
         ]

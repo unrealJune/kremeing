@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kremeing Hot Light</string>
+    <string name="notification_channel_name">Hot Light Alerts</string>
+    <string name="notification_channel_description">Alerts when a nearby store turns its hot light on</string>
+</resources>

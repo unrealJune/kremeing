@@ -16,6 +16,7 @@
     <Compile Include="SecurityContractTests.fs" />
     <Compile Include="SearchContractTests.fs" />
     <Compile Include="PushSubscriptionsContractTests.fs" />
+    <Compile Include="DeviceSubscriptionsContractTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

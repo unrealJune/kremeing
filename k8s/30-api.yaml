@@ -52,6 +52,25 @@ spec:
                   key: url
             - name: ASPNETCORE_URLS
               value: http://0.0.0.0:8080
+            # Optional push transports. Uncomment after creating the
+            # kremeing-push Secret (see 20-push-secret.example.yaml). The api
+            # role serves the subscribe/unsubscribe endpoints; enabling these
+            # turns /subscriptions and /device-subscriptions from 503 to live.
+            # - name: KREMEING_VAPID_PUBLIC_KEY
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-push, key: vapid-public-key }
+            # - name: KREMEING_VAPID_PRIVATE_KEY
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-push, key: vapid-private-key }
+            # - name: KREMEING_VAPID_SUBJECT
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-push, key: vapid-subject }
+            # - name: KREMEING_FCM_PROJECT_ID
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-push, key: fcm-project-id }
+            # - name: KREMEING_FCM_ACCESS_TOKEN
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-push, key: fcm-access-token }
           # Container-level: drop every Linux capability, deny privilege
           # escalation, mount the rootfs read-only. ASP.NET Core needs a
           # writable /tmp and writable DataProtection-Keys dir — both
