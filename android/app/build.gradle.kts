@@ -34,6 +34,17 @@ android {
             "KREMEING_BASE_URL",
             "\"${project.findProperty("kremeingBaseUrl") ?: "https://kremeing.example.com"}\"",
         )
+
+        // Whether the app wires up FCM push + notifications. Turn this off
+        // (-PkremeingPushEnabled=false) to build a "notificationless" APK that
+        // skips the token/subscribe flow entirely — useful for CI-built debug
+        // APKs that ship without a google-services.json, where fetching an FCM
+        // token would otherwise fail with "Couldn't get a push token".
+        buildConfigField(
+            "boolean",
+            "PUSH_ENABLED",
+            "${project.findProperty("kremeingPushEnabled") ?: "true"}",
+        )
     }
 
     buildTypes {
