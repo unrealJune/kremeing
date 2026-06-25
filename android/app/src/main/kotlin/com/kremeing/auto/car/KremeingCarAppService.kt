@@ -5,8 +5,9 @@ import androidx.car.app.Session
 import androidx.car.app.validation.HostValidator
 
 /**
- * Entry point the Android Auto host binds to. Declared with the POI category
- * in the manifest so the app can show place cards and hand navigation off to
+ * Entry point the Android Auto host binds to. Declared with the navigation
+ * category in the manifest so the app can host a NavigationTemplate and draw its
+ * hot-light dashboard on the car's custom Surface, and hand navigation off to
  * the active nav provider.
  */
 class KremeingCarAppService : CarAppService() {

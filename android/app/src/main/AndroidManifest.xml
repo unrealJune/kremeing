@@ -2,12 +2,21 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Declares this as an Android Auto app of the navigation/POI flavor so
-         it can render place cards and trigger turn-by-turn in Google Maps. -->
+    <!-- Car App Library: the WEATHER category + these permissions let the app
+         host a MapWithContentTemplate and draw its hot-light dashboard on the
+         car's custom Surface (Canvas) — without claiming the navigation surface.
+         MAP_TEMPLATES (not NAVIGATION_TEMPLATES) keeps it out of the nav flow. -->
+    <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+
+    <!-- Declares this as an Android Auto weather app: it draws a custom map/canvas
+         dashboard via MapWithContentTemplate and hands navigation off to the
+         active nav provider, without being a navigation app itself. -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -23,16 +32,24 @@
             android:name="androidx.car.app.minCarApiLevel"
             android:value="1" />
 
-        <!-- Phone companion entry point: lets the user set their notify radius
-             and grant location/notification permissions. -->
+        <!-- Phone home screen: native OpenStreetMap map of nearby stores,
+             pins colored by hot-light status. The app's launcher entry. -->
         <activity
-            android:name=".MainActivity"
-            android:exported="true">
+            android:name=".map.MapActivity"
+            android:exported="true"
+            android:theme="@style/Theme.Kremeing.Map">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Settings screen: notify radius slider + location/notification
+             permissions and (when enabled) the push subscription. Reached from
+             the map's overflow menu. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false" />
 
         <!-- The Android Auto host binds to this service to drive the car UX. -->
         <service
@@ -40,7 +57,7 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="androidx.car.app.CarAppService" />
-                <category android:name="androidx.car.app.category.POI" />
+                <category android:name="androidx.car.app.category.WEATHER" />
             </intent-filter>
         </service>
 

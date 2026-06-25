@@ -74,7 +74,7 @@ class KremeingApiClientTest {
             """.trimIndent()
         }
 
-        val stores = KremeingApiClient(baseUrl).nearbyStores(47.6, -122.3, 25.0)
+        val stores = KremeingApiClient(baseUrl).nearbyStores(47.6, -122.3)
 
         assertEquals(2, stores.size)
         assertEquals(HotLightStatus.ON, stores[0].status)
@@ -82,9 +82,9 @@ class KremeingApiClientTest {
         assertEquals("GET", req.method)
         assertEquals("/stores/nearby", req.path)
         val query = req.query!!
-        assertTrue(query.contains("latitude=47.6"), query)
-        assertTrue(query.contains("longitude=-122.3"), query)
-        assertTrue(query.contains("radiusMiles=25.0"), query)
+        assertTrue(query.contains("lat=47.6"), query)
+        assertTrue(query.contains("lng=-122.3"), query)
+        assertTrue(query.contains("limit=12"), query)
     }
 
     @Test

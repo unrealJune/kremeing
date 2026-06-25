@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -64,6 +65,30 @@ class MainActivity : AppCompatActivity() {
         if (pushEnabled) HotLightNotifier.ensureChannel(this)
 
         statusView = TextView(this).apply { textSize = 16f }
+
+        // Configurable card radius (miles) — the Android Auto card lists lit
+        // stores within this straight-line distance. Persisted to prefs and read
+        // live by HotLightScreen on each refresh.
+        val radiusLabel = TextView(this).apply { textSize = 16f }
+        val radiusSlider = SeekBar(this).apply {
+            max = MAX_RADIUS_MILES - MIN_RADIUS_MILES
+            progress = (prefs.radiusMiles.toInt() - MIN_RADIUS_MILES).coerceIn(0, max)
+        }
+        fun renderRadiusLabel(miles: Int) {
+            radiusLabel.text = getString(R.string.radius_label, miles)
+        }
+        renderRadiusLabel(MIN_RADIUS_MILES + radiusSlider.progress)
+        radiusSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                val miles = MIN_RADIUS_MILES + progress
+                renderRadiusLabel(miles)
+                prefs.radiusMiles = miles.toDouble()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(48, 48, 48, 48)
@@ -72,6 +97,8 @@ class MainActivity : AppCompatActivity() {
                 textSize = 22f
             })
             addView(statusView)
+            addView(radiusLabel)
+            addView(radiusSlider)
         }
         setContentView(root)
 
@@ -153,5 +180,9 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         private const val TAG = "KremeingMain"
         val DEFAULT_LOCATION = 47.6062 to -122.3321
+
+        // Card radius slider bounds (miles).
+        const val MIN_RADIUS_MILES = 1
+        const val MAX_RADIUS_MILES = 50
     }
 }

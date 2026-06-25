@@ -20,6 +20,14 @@ object ApiCodec {
     fun decodeNearby(body: String): NearbyResponse =
         json.decodeFromString(NearbyResponse.serializer(), body)
 
+    /** Decode a `GET /stores/{id}/history` response body. */
+    fun decodeHistory(body: String): HotLightHistory =
+        json.decodeFromString(HotLightHistory.serializer(), body)
+
+    /** Decode a `GET /stores/{id}/uptime` response body. */
+    fun decodeUptime(body: String): UptimeResponse =
+        json.decodeFromString(UptimeResponse.serializer(), body)
+
     /** Encode a `POST /device-subscriptions` request body. */
     fun encodeSubscribe(request: DeviceSubscribeRequest): String =
         json.encodeToString(DeviceSubscribeRequest.serializer(), request)

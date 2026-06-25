@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Kremeing" parent="Theme.AppCompat.DayNight" />
+    <style name="Theme.Kremeing" parent="Theme.MaterialComponents.DayNight">
+        <item name="colorPrimary">@color/kremeing_primary</item>
+        <item name="colorPrimaryVariant">@color/kremeing_primary_variant</item>
+        <item name="colorOnPrimary">@color/kremeing_on_primary</item>
+        <item name="colorSecondary">@color/kremeing_secondary</item>
+        <item name="colorOnSecondary">@color/kremeing_on_secondary</item>
+    </style>
+
+    <!-- Immersive variant for the map home screen: no action bar, edge-to-edge
+         with transparent system bars so the map fills the whole screen. -->
+    <style name="Theme.Kremeing.Map" parent="Theme.Kremeing">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

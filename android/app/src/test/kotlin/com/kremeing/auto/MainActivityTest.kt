@@ -55,7 +55,7 @@ class MainActivityTest {
         // No location fix in the test -> the activity falls back to its default.
         assertEquals(47.6062, call.latitude, 1e-9)
         assertEquals(-122.3321, call.longitude, 1e-9)
-        assertEquals(25.0, call.radiusMiles, 1e-9)
+        assertEquals(10.0, call.radiusMiles, 1e-9)
     }
 
     @Test

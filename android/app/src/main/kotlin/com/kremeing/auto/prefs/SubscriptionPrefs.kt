@@ -45,7 +45,7 @@ class SubscriptionPrefs(context: Context) {
         }
 
     companion object {
-        const val DEFAULT_RADIUS_MILES = 25.0
+        const val DEFAULT_RADIUS_MILES = 10.0
         private const val KEY_TOKEN = "fcm_token"
         private const val KEY_RADIUS = "radius_miles"
         private const val KEY_LAT = "last_lat"

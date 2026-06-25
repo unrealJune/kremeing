@@ -6,6 +6,7 @@ import androidx.car.app.testing.ScreenController
 import androidx.car.app.testing.TestCarContext
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ApplicationProvider
+import com.kremeing.auto.car.LocationSource
 import com.kremeing.auto.car.screens.HotLightScreen
 import com.kremeing.auto.logic.NavigationIntent
 import com.kremeing.auto.prefs.SubscriptionPrefs
@@ -33,6 +34,9 @@ class HotLightScreenTest {
     /** Runs submitted work inline so refresh() completes before assertions. */
     private val direct = Executor { it.run() }
 
+    /** Fixed location so the screen never touches real location services. */
+    private val fixedLocation = LocationSource { 47.6 to -122.3 }
+
     private lateinit var carContext: TestCarContext
     private lateinit var prefs: SubscriptionPrefs
 
@@ -43,7 +47,9 @@ class HotLightScreenTest {
     }
 
     private fun screen(client: FakeKremeingApiClient, executor: Executor = direct) =
-        HotLightScreen(carContext, client, prefs, executor)
+        // autoRefreshSeconds = 0 disables the background poll so tests stay
+        // deterministic and don't spin real timers.
+        HotLightScreen(carContext, client, prefs, executor, fixedLocation, autoRefreshSeconds = 0L)
 
     private fun rows(screen: HotLightScreen): List<Row> {
         val template = screen.onGetTemplate() as ListTemplate
@@ -54,7 +60,7 @@ class HotLightScreenTest {
         (screen.onGetTemplate() as ListTemplate).singleList?.noItemsMessage?.toString()
 
     @Test
-    fun `lists only lit stores, nearest first, with formatted cards`() {
+    fun `lists all nearby stores, lit first then nearest, with status and address`() {
         val client = FakeKremeingApiClient(
             stores = listOf(
                 store(id = 1, name = "Far KK", distanceMiles = 5.0, status = "on"),
@@ -64,15 +70,29 @@ class HotLightScreenTest {
         )
         val rows = rows(screen(client))
 
-        assertEquals(listOf("Near KK", "Far KK"), rows.map { it.title.toString() })
-        assertEquals("0.4 mi · 9 Pike St", rows.first().texts.first().toString())
+        // Lit stores first (nearest-first among them), then off stores by distance.
+        assertEquals(listOf("Near KK", "Far KK", "Dark KK"), rows.map { it.title.toString() })
+        assertEquals("🔥 ON · 0.4 mi · 9 Pike St", rows.first().texts.first().toString())
     }
 
     @Test
-    fun `shows empty-state message when nothing is lit`() {
-        val client = FakeKremeingApiClient(stores = listOf(store(id = 1, status = "off")))
+    fun `radius pref ranks within-radius stores first, even off ones`() {
+        prefs.radiusMiles = 5.0
+        val client = FakeKremeingApiClient(
+            stores = listOf(
+                store(id = 1, name = "Far Lit", distanceMiles = 20.0, status = "on"),
+                store(id = 2, name = "Near Off", distanceMiles = 3.0, status = "off"),
+            ),
+        )
+        // The off store inside the radius outranks the lit store outside it.
+        assertEquals(listOf("Near Off", "Far Lit"), rows(screen(client)).map { it.title.toString() })
+    }
+
+    @Test
+    fun `shows empty-state message when there are no nearby stores`() {
+        val client = FakeKremeingApiClient(stores = emptyList())
         assertTrue(rows(screen(client)).isEmpty())
-        assertEquals("No hot lights on right now", noItemsMessage(screen(client)))
+        assertEquals("No stores nearby", noItemsMessage(screen(client)))
     }
 
     @Test
@@ -87,7 +107,7 @@ class HotLightScreenTest {
         // initial loading state.
         val pending = Executor { /* drop the runnable */ }
         val client = FakeKremeingApiClient()
-        assertEquals("Looking for hot lights nearby…", noItemsMessage(screen(client, pending)))
+        assertEquals("Looking for nearby stores…", noItemsMessage(screen(client, pending)))
     }
 
     @Test

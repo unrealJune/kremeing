@@ -2,6 +2,7 @@ package com.kremeing.auto.testing
 
 import com.kremeing.auto.api.KremeingApiClient
 import com.kremeing.auto.logic.DeviceSubscribeResponse
+import com.kremeing.auto.logic.HotLightHistory
 import com.kremeing.auto.logic.NearbyStore
 
 /**
@@ -12,6 +13,7 @@ import com.kremeing.auto.logic.NearbyStore
 class FakeKremeingApiClient(
     private val stores: List<NearbyStore> = emptyList(),
     private val failNearby: Boolean = false,
+    private val history: HotLightHistory = HotLightHistory(storeId = 0, flips = emptyList()),
 ) : KremeingApiClient("https://fake.invalid") {
 
     data class SubscribeCall(
@@ -29,7 +31,7 @@ class FakeKremeingApiClient(
     override fun nearbyStores(
         latitude: Double,
         longitude: Double,
-        radiusMiles: Double,
+        limit: Int,
     ): List<NearbyStore> {
         nearbyCallCount++
         if (failNearby) throw RuntimeException("boom")
@@ -49,6 +51,12 @@ class FakeKremeingApiClient(
     override fun unsubscribeDevice(token: String) {
         // no-op for tests
     }
+
+    override fun history(
+        storeId: Int,
+        sinceIso: String?,
+        untilIso: String?,
+    ): HotLightHistory = history
 }
 
 /** Shared store fixture mirroring the `:logic` test fixtures. */

@@ -99,6 +99,30 @@ class LitStoreFilterTests {
         assertEquals(2, LitStoreFilter.litNearby(stores, limit = 2).size)
     }
 
+    @Test fun `filters out stores beyond the radius (inclusive boundary)`() {
+        val stores = listOf(
+            Stores.store(1, distanceMiles = 1.0),
+            Stores.store(2, distanceMiles = 10.0),
+            Stores.store(3, distanceMiles = 10.001),
+            Stores.store(4, distanceMiles = 25.0),
+        )
+        assertEquals(
+            listOf(1, 2),
+            LitStoreFilter.litNearby(stores, maxDistanceMiles = 10.0).map { it.id },
+        )
+    }
+
+    @Test fun `null radius keeps all distances`() {
+        val stores = (1..3).map { Stores.store(it, distanceMiles = it * 100.0) }
+        assertEquals(3, LitStoreFilter.litNearby(stores, maxDistanceMiles = null).size)
+    }
+
+    @Test fun `non-positive radius yields empty`() {
+        val stores = listOf(Stores.store(1, distanceMiles = 0.0))
+        assertTrue(LitStoreFilter.litNearby(stores, maxDistanceMiles = 0.0).isEmpty())
+        assertTrue(LitStoreFilter.litNearby(stores, maxDistanceMiles = -5.0).isEmpty())
+    }
+
     @Test fun `non-positive limit yields empty`() {
         val stores = listOf(Stores.store(1))
         assertTrue(LitStoreFilter.litNearby(stores, limit = 0).isEmpty())
@@ -115,6 +139,46 @@ class LitStoreFilterTests {
         assertTrue(LitStoreFilter.anyLit(stores))
         assertFalse(LitStoreFilter.anyLit(listOf(Stores.store(1, status = "off"))))
         assertNull(LitStoreFilter.nearestLit(listOf(Stores.store(1, status = "off"))))
+    }
+
+    @Test fun `nearbyAll keeps off stores, lit first then nearest`() {
+        val stores = listOf(
+            Stores.store(1, status = "off", distanceMiles = 0.1),
+            Stores.store(2, status = "on", distanceMiles = 2.0),
+            Stores.store(3, status = "off", distanceMiles = 0.5),
+            Stores.store(4, status = "on", distanceMiles = 1.0),
+        )
+        // Lit first (4 @1.0, 2 @2.0), then off by distance (1 @0.1, 3 @0.5).
+        assertEquals(listOf(4, 2, 1, 3), LitStoreFilter.nearbyAll(stores).map { it.id })
+    }
+
+    @Test fun `nearbyRanked pins within-radius stores on top even if off`() {
+        val stores = listOf(
+            Stores.store(1, status = "on", distanceMiles = 20.0),  // far + lit
+            Stores.store(2, status = "off", distanceMiles = 3.0),  // near + off
+            Stores.store(3, status = "on", distanceMiles = 1.0),   // near + lit
+            Stores.store(4, status = "off", distanceMiles = 15.0), // far + off
+        )
+        // radius=5: within-radius first (lit 3 @1.0, then off 2 @3.0), then
+        // outside (lit 1 @20.0, then off 4 @15.0 — lit leads within its group).
+        assertEquals(
+            listOf(3, 2, 1, 4),
+            LitStoreFilter.nearbyRanked(stores, radiusMiles = 5.0).map { it.id },
+        )
+    }
+
+    @Test fun `nearbyRanked respects the limit`() {
+        val stores = (1..20).map { Stores.store(it, distanceMiles = it.toDouble(), status = "off") }
+        assertEquals(LitStoreFilter.MAX_ROWS_ALL, LitStoreFilter.nearbyRanked(stores, 5.0).size)
+        assertEquals(3, LitStoreFilter.nearbyRanked(stores, 5.0, limit = 3).size)
+        assertTrue(LitStoreFilter.nearbyRanked(stores, 5.0, limit = 0).isEmpty())
+    }
+
+    @Test fun `nearbyAll respects the limit and ignores radius`() {
+        val stores = (1..20).map { Stores.store(it, distanceMiles = it.toDouble(), status = "off") }
+        assertEquals(LitStoreFilter.MAX_ROWS_ALL, LitStoreFilter.nearbyAll(stores).size)
+        assertEquals(3, LitStoreFilter.nearbyAll(stores, limit = 3).size)
+        assertTrue(LitStoreFilter.nearbyAll(stores, limit = 0).isEmpty())
     }
 }
 

@@ -1,22 +1,18 @@
 plugins {
     // AGP and the Kotlin plugins are declared together here, with versions, so
-    // they load on THIS module's classpath. Applying org.jetbrains.kotlin.android
-    // needs AGP's classes (e.g. com.android.build.gradle.api.BaseVariant) on the
-    // same classpath; that only holds when AGP and Kotlin are requested together
-    // in this block (the root build deliberately puts neither on a shared
-    // classpath — see android/build.gradle.kts).
+    // they load on THIS module's classpath (applying kotlin.android needs AGP's
+    // classes on the same classpath — see android/build.gradle.kts).
     //
-    // AGP is pinned to 8.1.x because the Kotlin version used here (1.9.24) only
-    // supports AGP up to 8.1; newer AGP makes kotlin.android fail to apply with
-    // "Could not generate a decorated class for type KotlinAndroidTarget".
-    id("com.android.application") version "8.1.4"
-    id("org.jetbrains.kotlin.android") version "1.9.24"
-    kotlin("plugin.serialization") version "1.9.24"
+    // Modernized toolchain: AGP 8.9.1 + Kotlin 2.2.21 + compileSdk 36, required
+    // to consume de.afarber:openmapview (built with Kotlin 2.2 metadata).
+    id("com.android.application") version "8.9.1"
+    id("org.jetbrains.kotlin.android") version "2.2.21"
+    kotlin("plugin.serialization") version "2.2.21"
 }
 
 android {
     namespace = "com.kremeing.auto"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.kremeing.auto"
@@ -75,18 +71,33 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
 
-    kotlinOptions {
-        jvmTarget = "17"
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 
 dependencies {
     implementation(project(":logic"))
+    // Android Auto / Car App Library — provides the templated car UX. 1.7.0 adds
+    // the WEATHER category + MapWithContentTemplate (car API 7), letting the app
+    // draw its own canvas/surface under MAP_TEMPLATES without being a nav app.
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-automotive:1.7.0")
 
-    // Android Auto / Car App Library — provides the templated POI card UX.
-    implementation("androidx.car.app:app:1.4.0")
-    implementation("androidx.car.app:app-automotive:1.4.0")
+    // Live location for the car card (FusedLocationProviderClient): the screen
+    // queries the driver's current position each refresh so the nearby list
+    // tracks them while driving.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+
+    // Native map for the phone home screen — osmdroid (OpenStreetMap), smooth
+    // multi-touch zoom + disk tile caching, no API key.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
+    // Material components: bottom sheet for the store-detail / heat-bar panel.
+    implementation("com.google.android.material:material:1.12.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
@@ -97,7 +108,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-messaging-ktx")
 
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Layer 1 — Robolectric JVM tests of the Android Auto UX, notifications and
     // the companion activity. androidx.car.app:app-testing provides the
@@ -106,7 +117,7 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("androidx.test:core:1.6.1")
     testImplementation("androidx.test.ext:junit:1.2.1")
-    testImplementation("androidx.car.app:app-testing:1.4.0")
+    testImplementation("androidx.car.app:app-testing:1.7.0")
 
     // Layer 2 — thin on-emulator Espresso smoke test (opt-in CI job).
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
