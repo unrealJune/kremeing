@@ -1,0 +1,65 @@
+# Kremeing Android Auto / phone app — dev workflows.
+#
+# Run from the android/ directory: `just build`, `just test`, `just download`,
+# `just dhu`. Requires `just` (https://just.systems) and PowerShell on Windows.
+#
+# Paths default to this machine's setup but can be overridden via environment
+# variables (KREMEING_JAVA_HOME, ANDROID_SDK_ROOT, KREMEING_BASE_URL).
+#
+# Notes / gotchas:
+#  * Builds MUST use a JDK with jmods (Temurin 17). The Android Studio JBR
+#    (JDK 21, no jmods) fails AGP's JdkImageTransform/jlink.
+#  * `just test` uses DEFAULT flags on purpose — passing -PkremeingPushEnabled
+#    breaks MainActivityTest, which assumes push is enabled.
+#  * `just download` installs with `-i com.android.vending` to spoof the Play
+#    Store as the installer: sideloaded Car App Library apps with no installer
+#    never appear in Android Auto / the DHU.
+
+set windows-shell := ["powershell.exe", "-NoProfile", "-Command"]
+
+java_home := env_var_or_default('KREMEING_JAVA_HOME', 'Z:\jdks\jdk-17.0.19+10')
+sdk       := env_var_or_default('ANDROID_SDK_ROOT', 'Z:\AndroidStudio\SDK')
+base_url  := env_var_or_default('KREMEING_BASE_URL', 'https://kremeing.junephilip.com')
+
+adb := sdk + '\platform-tools\adb.exe'
+dhu := sdk + '\extras\google\auto\desktop-head-unit.exe'
+apk := 'app\build\outputs\apk\debug\app-debug.apk'
+
+phone_apk := '/sdcard/Download/kremeing-auto-debug.apk'
+gearhead  := 'com.google.android.projection.gearhead'
+
+alias start-dhu := dhu
+
+# List the available recipes.
+default:
+    @just --list
+
+# Build the debug APK (prod base URL, push/notifications off).
+build:
+    .\gradlew.bat :app:assembleDebug -PbuildAndroidApp=true -PkremeingBaseUrl={{base_url}} -PkremeingPushEnabled=false "-Dorg.gradle.java.home={{java_home}}"
+    @Write-Host 'APK: {{apk}}'
+
+# Run the :logic + :app unit tests (default flags — see header note).
+test:
+    .\gradlew.bat :logic:test :app:testDebugUnitTest -PbuildAndroidApp=true "-Dorg.gradle.java.home={{java_home}}"
+
+# Install the built APK to the phone (Play-installer spoof) + copy to Downloads.
+download:
+    @if (-not (Test-Path '{{apk}}')) { Write-Error 'APK not found at {{apk}} - run: just build'; exit 1 }
+    {{adb}} install -r -i com.android.vending '{{apk}}'
+    {{adb}} push '{{apk}}' {{phone_apk}}
+    {{adb}} shell am force-stop {{gearhead}}
+    @Write-Host 'Installed + pushed to {{phone_apk}}'
+
+# Build then deploy in one step.
+deploy: build download
+
+# Start the Desktop Head Unit (forwards the projection port first).
+dhu:
+    {{adb}} forward tcp:5277 tcp:5277
+    Start-Process -FilePath '{{dhu}}' -WorkingDirectory '{{sdk}}\extras\google\auto'
+    @Write-Host 'DHU launched (port 5277 forwarded).'
+
+# Stop the Desktop Head Unit.
+kill-dhu:
+    @Get-Process -Name 'desktop-head-unit' -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.Id -Force; Write-Host ('Killed DHU PID ' + $_.Id) }
