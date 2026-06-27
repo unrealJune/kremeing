@@ -278,11 +278,15 @@ object Uptime {
         val day = localDayBounds(nowMs, zone)
         val earliest = flips.minOfOrNull { it.atMs } ?: day.startMs
         val historyStart = minOf(earliest, day.startMs)
-        val allIntervals = flipsToIntervals(flips, historyStart, day.endMs)
-        val todayIntervals = flipsToIntervals(flips, day.startMs, day.endMs)
+        // Live history is only known up to "now"; the rest of the day is left to
+        // the predictive ribbon. Mirrors the web's `flipsToIntervals(.., Date.now())`
+        // so the live bar never lights up past the current moment.
+        val liveEnd = nowMs.coerceIn(day.startMs, day.endMs)
+        val allIntervals = flipsToIntervals(flips, historyStart, liveEnd)
+        val todayIntervals = flipsToIntervals(flips, day.startMs, liveEnd)
         val probability = commonOnProbabilities(allIntervals, nowMs, zone)
         val basis = probability?.let { basisLabel(it.basis, nowMs, zone) }
-        val byDay = splitIntervalsByLocalDay(allIntervals, historyStart, day.endMs, zone)
+        val byDay = splitIntervalsByLocalDay(allIntervals, historyStart, liveEnd, zone)
         return DayHeatBar(
             todayIntervals = todayIntervals,
             probabilities = probability?.probabilities,

@@ -157,8 +157,11 @@ class CommonOnProbabilitiesTests {
         assertEquals(day.endMs, bar.dayEndMs)
         assertEquals(now, bar.nowMs)
         assertTrue(bar.todayIntervals.isNotEmpty())
-        // The light flipped on at 9am, so the day ends ON.
+        // The light flipped on at 9am, so the live bar is currently ON.
         assertEquals(HotLightStatus.ON, bar.todayIntervals.last().status)
+        // ...but the live bar must stop at "now" (noon), not run to end of day —
+        // the predictive ribbon, not the live segment, covers the rest of the day.
+        assertEquals(now, bar.todayIntervals.last().endMs)
     }
 
     @Test fun `usualOnWindows finds contiguous high-probability runs longest first`() {
