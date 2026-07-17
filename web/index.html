@@ -178,6 +178,7 @@
 
   <script src="stores.js"></script>
   <script src="uptime-utils.js"></script>
+  <script src="location-utils.js"></script>
   <!-- Service worker: registered as soon as the page loads so push
        payloads route to /sw.js even before React mounts. Failures are
        non-fatal (older browsers, file:// origins, etc.). -->
@@ -221,6 +222,7 @@
       const [searching, setSearching] = React.useState(false);
       const [stores, setStores] = React.useState([]);
       const [error, setError] = React.useState(null);
+      const [locationError, setLocationError] = React.useState(null);
       const [selected, setSelected] = React.useState(SHARED ? SHARED.id : null);
       const [listOpen, setListOpen] = React.useState(false);
       // The set of store IDs this browser is *already* subscribed to.
@@ -270,56 +272,109 @@
 
       const moveDebounceRef = React.useRef(null);
       const viewportRequestRef = React.useRef(null);
+      const activeLocateRef = React.useRef(null);
+      const locationPermissionRef = React.useRef('unknown');
 
-      // Locate handler used by both the gesture-less auto-attempt on
-      // mount and the explicit "locate me" button. iOS Safari will not
-      // show the permission prompt for gesture-less calls — and worse,
-      // a gesture-less failure used to flip the button into 'denied',
-      // disabling it before the user ever got a chance to tap. The
-      // `interactive` flag is the gating mechanism: only a real user
-      // gesture can move the button into 'locating' or 'denied'.
-      // Auto-locate successes still update userPos/center/locateState
-      // because that's strictly progress, not regression.
+      // The explicit call remains synchronous with the click handler so
+      // WebKit sees the user gesture. KREMEING_LOCATION uses a one-result
+      // watch plus its own watchdog because iOS Safari can leave the native
+      // request pending forever without firing either callback.
       const locateMe = React.useCallback((interactive) => {
-        if (!navigator.geolocation) {
+        const diagnostics = {
+          interactive,
+          origin: window.location.origin,
+          secureContext: window.isSecureContext,
+          topLevel: window.top === window,
+          userActivation: navigator.userActivation?.isActive ?? 'unsupported',
+          visibility: document.visibilityState,
+          permission: locationPermissionRef.current,
+        };
+        if (!window.isSecureContext || !navigator.geolocation) {
+          console.warn('[kremeing] geolocation unavailable', diagnostics);
           if (interactive) setLocateState('denied');
+          if (interactive) {
+            setLocationError(window.isSecureContext
+              ? 'Location is unavailable in this browser.'
+              : 'Location requires a secure HTTPS connection.');
+          }
           setLocating(false);
           return;
         }
-        if (interactive) setLocateState('locating');
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-            setUserPos(c);
-            setCenter(c);
-            setLocateState('located');
-            setLocating(false);
+
+        activeLocateRef.current?.cancel();
+        setLocating(true);
+        setLocationError(null);
+        if (interactive) {
+          setLocateState('locating');
+          console.info('[kremeing] geolocation request started', diagnostics);
+        }
+
+        const attempt = { cancel() {} };
+        activeLocateRef.current = attempt;
+        let request;
+        request = window.KREMEING_LOCATION.requestCurrentPosition(
+          navigator.geolocation,
+          {
+            onSuccess: (pos) => {
+              if (activeLocateRef.current !== attempt) return;
+              activeLocateRef.current = null;
+              if (interactive) {
+                console.info('[kremeing] geolocation request succeeded', {
+                  accuracy: pos.coords.accuracy,
+                });
+              }
+              const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+              setUserPos(c);
+              setCenter(c);
+              setLocateState('located');
+              setLocationError(null);
+              setLocating(false);
+            },
+            onError: (err) => {
+              if (activeLocateRef.current !== attempt) return;
+              activeLocateRef.current = null;
+              setLocating(false);
+              if (!interactive) return;   // keep the button tappable
+              console.warn('[kremeing] geolocation request failed', {
+                ...diagnostics,
+                code: err.code,
+                name: err.name,
+                message: err.message,
+              });
+              if (err.code === 1) {
+                setLocateState('denied');
+                setLocationError(
+                  'Location was blocked by Safari or iOS settings. Change the setting, then tap again.');
+              } else if (err.appTimeout) {
+                setLocateState('idle');
+                setLocationError(
+                  'Safari did not finish the location request. Tap the location button to retry.');
+              } else {
+                setLocateState('idle');
+                setLocationError('Your location is currently unavailable. Tap to retry.');
+              }
+            },
           },
-          (err) => {
-            setLocating(false);
-            if (!interactive) return;   // keep the button tappable
-            setLocateState(
-              err && err.code === err.PERMISSION_DENIED ? 'denied' : 'idle');
-          },
-          { timeout: 10_000, maximumAge: 60_000 }
+          {
+            watchdogMs: 12_000,
+            positionOptions: { timeout: 10_000, maximumAge: 60_000 },
+          }
         );
+        attempt.cancel = () => request.cancel();
       }, []);
 
-      // ── Best-effort auto-locate on mount. iOS Safari does more than
-      //    silently fail gesture-less getCurrentPosition calls — the
-      //    request can stay pending indefinitely (the `timeout` option
-      //    is effectively ignored without a gesture), and a subsequent
-      //    gesture-driven call from the locate button gets interfered
-      //    with so neither callback fires and the button stays stuck
-      //    in 'locating' (greyed out). To avoid that, we only fire the
-      //    gesture-less call when the Permissions API tells us
-      //    geolocation is already 'granted'. Otherwise we skip and
-      //    wait for the user to tap the button, which preserves a
-      //    clean gesture for iOS Safari's prompt.
+      // ── Best-effort auto-locate only when permission is already granted.
+      //    Safari can still misreport or leave that request pending; locateMe
+      //    cancels any active auto-attempt synchronously before a button tap,
+      //    preserving the new gesture for the permission prompt.
       React.useEffect(() => {
         if (SHARED) { setLocating(false); return; }
-        if (!navigator.geolocation) { setLocating(false); return; }
+        if (!window.isSecureContext || !navigator.geolocation) {
+          setLocating(false);
+          return;
+        }
         if (!navigator.permissions || !navigator.permissions.query) {
+          console.info('[kremeing] geolocation permission status unavailable');
           setLocating(false);
           return;
         }
@@ -327,15 +382,25 @@
         navigator.permissions.query({ name: 'geolocation' })
           .then((status) => {
             if (cancelled) return;
+            locationPermissionRef.current = status.state;
+            console.info('[kremeing] geolocation permission status', status.state);
             if (status.state === 'granted') {
               locateMe(false);
             } else {
               setLocating(false);
             }
           })
-          .catch(() => { if (!cancelled) setLocating(false); });
+          .catch((err) => {
+            if (cancelled) return;
+            console.info('[kremeing] geolocation permission query failed', err);
+            setLocating(false);
+          });
         return () => { cancelled = true; };
       }, [locateMe]);
+
+      React.useEffect(() => {
+        return () => activeLocateRef.current?.cancel();
+      }, []);
 
       // ── Exact viewport fetch. Wide views request current state only;
       //    detail views also request the temporal fields used by the list.
@@ -397,6 +462,7 @@
         viewportRequestRef.current?.abort();
         setSearching(true);
         setError(null);
+        setLocationError(null);
         try {
           const results = await window.KREMEING_API.searchStores(q);
           setStores(results);
@@ -478,7 +544,7 @@
               onSearch={onSearch}
               locating={locating}
               searching={searching}
-              error={error}
+              error={locationError || error}
             />
 
             <LocateButton
