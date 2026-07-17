@@ -32,6 +32,11 @@ module Ports =
     type GetStoreStatus =
         StoreId -> Async<Result<StoreStatus, StoreError>>
 
+    /// Bulk projection used by map viewport reads. Implementations must avoid
+    /// loading temporal columns when `includeHistory` is false.
+    type GetStoreMapStatuses =
+        bool * StoreId list -> Async<Result<StoreMapStatus list, StoreError>>
+
     // ──── push notifications ───────────────────────────────────────────
 
     /// Idempotent subscribe: same (storeId, endpoint) returns the same

@@ -29,6 +29,22 @@ async function fetchNearbyStores(lat, lng, limit = 12) {
   return body.stores;
 }
 
+// ViewportResponse: every registry store within the supplied map bounds.
+// `includeHistory=false` keeps wide-map reads to current status only.
+async function fetchViewportStores(bounds, includeHistory = false, signal) {
+  const params = new URLSearchParams({
+    north: bounds.north.toString(),
+    south: bounds.south.toString(),
+    east: bounds.east.toString(),
+    west: bounds.west.toString(),
+    includeHistory: includeHistory.toString(),
+  });
+  const res = await fetch(`${API_BASE}/stores/viewport?${params}`, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.json();
+  return body.stores;
+}
+
 // UptimeBucket: { startUtc, endUtc, onSeconds, offSeconds,
 //                 observedSeconds, totalSeconds, fractionOn }
 async function fetchUptime(storeId, bucket /* 'hour' | 'day' */) {
@@ -320,7 +336,8 @@ function startOfLocalDay(ms) {
 
 Object.assign(window, {
   KREMEING_API: {
-    fetchNearbyStores, searchStores, fetchUptime, fetchHistory, fetchHotLight,
+    fetchNearbyStores, fetchViewportStores, searchStores,
+    fetchUptime, fetchHistory, fetchHotLight,
     getVapidPublicKey, subscribeStore, unsubscribeStore,
     listSubscribedStores, pushSupported,
     PUSH_DISABLED, PUSH_UNSUPPORTED,

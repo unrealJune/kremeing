@@ -158,6 +158,11 @@ module HttpHandlers =
     type SearchByQuery =
         string -> Async<Result<LiveApi.KrispyShopDto list, StoreError>>
 
+    /// Current discovery registry snapshot. Unlike SearchNearby, this is a
+    /// local read and is not capped by Krispy Kreme's upstream search API.
+    type ListStores =
+        unit -> Discovery.RegistryEntry list
+
     let private nearbyStoreToDto
             (storeStatus: Ports.GetStoreStatus)
             (shop: LiveApi.KrispyShopDto)
@@ -276,6 +281,150 @@ module HttpHandlers =
                     match result with
                     | Ok r -> return! json r next ctx
                     | Error err -> return! writeError err next ctx
+            }
+
+    // ──── /stores/viewport ──────────────────────────────────────────────
+
+    let private longitudeInBounds (west: float) (east: float) (lng: float) =
+        if west <= east then lng >= west && lng <= east
+        else lng >= west || lng <= east
+
+    let private viewportCenterLongitude (west: float) (east: float) =
+        if west <= east then
+            (west + east) / 2.0
+        else
+            let midpoint = (west + east + 360.0) / 2.0
+            if midpoint > 180.0 then midpoint - 360.0 else midpoint
+
+    let private viewportStoreToDto
+            (includeHistory: bool)
+            (center: Coordinates)
+            (statuses: Map<StoreId, StoreMapStatus>)
+            (entry: Discovery.RegistryEntry)
+            : NearbyStoreDto =
+        let id = StoreId entry.ShopId
+        let status = statuses |> Map.tryFind id
+        let nullableDate value =
+            value
+            |> Option.map Nullable
+            |> Option.defaultValue (Nullable())
+        {
+            id = entry.ShopId
+            name = entry.Name
+            address = entry.Address
+            latitude = entry.Location.Latitude
+            longitude = entry.Location.Longitude
+            distanceMiles = Geo.distanceMiles center entry.Location
+            currentStatus =
+                status
+                |> Option.map (fun s -> Mapping.statusToWire s.CurrentStatus)
+                |> Option.defaultValue StatusValues.Unknown
+            lastFlippedAt =
+                if includeHistory then
+                    status
+                    |> Option.bind (fun s -> s.LastFlippedAt)
+                    |> nullableDate
+                else
+                    Nullable()
+            firstObservedAt =
+                if includeHistory then
+                    status
+                    |> Option.bind (fun s -> s.FirstObservedAt)
+                    |> nullableDate
+                else
+                    Nullable()
+        }
+
+    let getViewport
+            (listStores: ListStores)
+            (mapStatuses: Ports.GetStoreMapStatuses)
+            : HttpHandler =
+        fun next ctx ->
+            task {
+                let north = ctx.TryGetQueryStringValue "north" |> Option.bind parseFloat
+                let south = ctx.TryGetQueryStringValue "south" |> Option.bind parseFloat
+                let east = ctx.TryGetQueryStringValue "east" |> Option.bind parseFloat
+                let west = ctx.TryGetQueryStringValue "west" |> Option.bind parseFloat
+                let includeHistory =
+                    match ctx.TryGetQueryStringValue "includeHistory" with
+                    | None -> Some false
+                    | Some raw ->
+                        match Boolean.TryParse raw with
+                        | true, value -> Some value
+                        | false, _ -> None
+                let validCoord (value: float) lo hi =
+                    not (Double.IsNaN value || Double.IsInfinity value)
+                    && value >= lo && value <= hi
+
+                match north, south, east, west, includeHistory with
+                | None, _, _, _, _ ->
+                    return! writeBadRequest "missing_query_param"
+                                "north is required and must be a number" next ctx
+                | _, None, _, _, _ ->
+                    return! writeBadRequest "missing_query_param"
+                                "south is required and must be a number" next ctx
+                | _, _, None, _, _ ->
+                    return! writeBadRequest "missing_query_param"
+                                "east is required and must be a number" next ctx
+                | _, _, _, None, _ ->
+                    return! writeBadRequest "missing_query_param"
+                                "west is required and must be a number" next ctx
+                | _, _, _, _, None ->
+                    return! writeBadRequest "invalid_query"
+                                "includeHistory must be true or false" next ctx
+                | Some n, Some s, _, _, _ when
+                        not (validCoord n -90.0 90.0)
+                        || not (validCoord s -90.0 90.0) ->
+                    return! writeBadRequest "invalid_coordinate"
+                                "north and south must be finite numbers in [-90, 90]"
+                                next ctx
+                | _, _, Some e, Some w, _ when
+                        not (validCoord e -180.0 180.0)
+                        || not (validCoord w -180.0 180.0) ->
+                    return! writeBadRequest "invalid_coordinate"
+                                "east and west must be finite numbers in [-180, 180]"
+                                next ctx
+                | Some n, Some s, _, _, _ when n < s ->
+                    return! writeBadRequest "invalid_bounds"
+                                "north must be greater than or equal to south"
+                                next ctx
+                | Some n, Some s, Some e, Some w, Some history ->
+                    let visible =
+                        listStores ()
+                        |> List.filter (fun entry ->
+                            entry.Location.Latitude >= s
+                            && entry.Location.Latitude <= n
+                            && longitudeInBounds w e entry.Location.Longitude)
+                    let ids = visible |> List.map (fun entry -> StoreId entry.ShopId)
+                    let! statusResult = mapStatuses (history, ids)
+                    match statusResult with
+                    | Error err ->
+                        return! writeError err next ctx
+                    | Ok statusList ->
+                        let statuses =
+                            statusList
+                            |> List.map (fun status -> status.StoreId, status)
+                            |> Map.ofList
+                        let center = {
+                            Latitude = (n + s) / 2.0
+                            Longitude = viewportCenterLongitude w e
+                        }
+                        let stores =
+                            visible
+                            |> List.map (viewportStoreToDto history center statuses)
+                            |> List.sortBy (fun store -> store.distanceMiles)
+                            |> List.toArray
+                        let response : ViewportResponseDto = {
+                            query = {
+                                north = n
+                                south = s
+                                east = e
+                                west = w
+                                includeHistory = history
+                            }
+                            stores = stores
+                        }
+                        return! json response next ctx
             }
 
     // ──── /stores/search ────────────────────────────────────────────────
@@ -650,8 +799,10 @@ module HttpHandlers =
         GetHotLightStatus: Ports.GetHotLightStatus
         SearchNearby: SearchNearby
         SearchByQuery: SearchByQuery
+        ListStores: ListStores
         History: Ports.GetHistory
         Status: Ports.GetStoreStatus
+        MapStatuses: Ports.GetStoreMapStatuses
         Now: unit -> DateTimeOffset
         /// Caches and rate-limit shield the upstream (api.krispykreme.com)
         /// from being hammered by API consumers. Tests use permissive
@@ -684,6 +835,8 @@ module HttpHandlers =
             GET >=> route "/stores/nearby"
                 >=> limited
                 >=> getNearby deps.SearchNearby deps.Status deps.NearbyCache deps.Now
+            GET >=> route "/stores/viewport"
+                >=> getViewport deps.ListStores deps.MapStatuses
             GET >=> route "/stores/search"
                 >=> limited
                 >=> getSearch deps.SearchByQuery deps.Status deps.SearchCache deps.Now

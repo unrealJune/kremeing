@@ -96,6 +96,27 @@ module InMemoryObservations =
                         return Ok result
                 }
 
+        member _.MapStatuses : Ports.GetStoreMapStatuses =
+            fun (includeHistory, ids) ->
+                async {
+                    let summaries =
+                        ids
+                        |> List.choose (fun id ->
+                            match states.TryGetValue id with
+                            | false, _ -> None
+                            | true, s ->
+                                lock s (fun () ->
+                                    Some {
+                                        StoreId = id
+                                        CurrentStatus = s.CurrentStatus
+                                        LastFlippedAt =
+                                            if includeHistory then s.LastFlippedAt else None
+                                        FirstObservedAt =
+                                            if includeHistory then Some s.FirstObservedAt else None
+                                    }))
+                    return Ok summaries
+                }
+
         static member Empty () = Store()
 
     let create () = Store.Empty()

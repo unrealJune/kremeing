@@ -61,6 +61,16 @@ module Domain =
         FirstObservedAt: DateTimeOffset
     }
 
+    /// Lightweight status projection for map rendering. Temporal fields are
+    /// optional so a wide viewport can fetch only current state, while a
+    /// detail viewport can request the context used by store UI.
+    type StoreMapStatus = {
+        StoreId: StoreId
+        CurrentStatus: HotLightStatus
+        LastFlippedAt: DateTimeOffset option
+        FirstObservedAt: DateTimeOffset option
+    }
+
     /// Cryptographic material the browser hands us when it subscribes
     /// to push. Endpoint is the push service URL (different per
     /// browser: FCM on Chrome, Mozilla autopush on Firefox, Apple

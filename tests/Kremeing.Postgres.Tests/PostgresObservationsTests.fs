@@ -125,6 +125,33 @@ type Tests(fx: PostgresFixture.PostgresFixture) =
         | other -> failwithf "expected StoreNotFound, got %A" other
 
     [<PgProbe.PgFact>]
+    member _.``map statuses bulk-read current state and gate temporal context`` () =
+        let s = store ()
+        let _ = record s (obs 899 On (at 10 0))
+        let _ = record s (obs 899 Off (at 10 5))
+        let _ = record s (obs 898 On (at 10 0))
+
+        match
+            s.MapStatuses (false, [ StoreId 899; StoreId 898; StoreId 12345 ])
+            |> Async.RunSynchronously
+        with
+        | Error e -> failwithf "expected Ok, got %A" e
+        | Ok statuses ->
+            statuses.Length |> should equal 2
+            statuses |> List.find (fun status -> status.StoreId = StoreId 899)
+                     |> fun status -> status.CurrentStatus |> should equal Off
+            statuses |> List.iter (fun status ->
+                status.LastFlippedAt |> should equal None
+                status.FirstObservedAt |> should equal None)
+
+        match s.MapStatuses (true, [ StoreId 899 ]) |> Async.RunSynchronously with
+        | Error e -> failwithf "expected Ok, got %A" e
+        | Ok [ summary ] ->
+            summary.LastFlippedAt |> should equal (Some (at 10 5))
+            summary.FirstObservedAt |> should equal (Some (at 10 0))
+        | Ok other -> failwithf "expected one summary, got %A" other
+
+    [<PgProbe.PgFact>]
     member _.``different stores have independent flip state`` () =
         let s = store ()
         let _ = record s (obs 899 On (at 10 0))

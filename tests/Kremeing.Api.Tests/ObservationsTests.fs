@@ -139,6 +139,33 @@ module StoreStatus =
         | Error (StoreNotFound (StoreId 12345)) -> ()
         | other -> failwithf "expected StoreNotFound, got %A" other
 
+    [<Fact>]
+    let ``map statuses bulk-read current state and gate temporal context`` () =
+        let store = InMemoryObservations.create ()
+        let _ = record store (obs 899 On (at 10 0))
+        let _ = record store (obs 899 Off (at 10 5))
+        let _ = record store (obs 898 On (at 10 0))
+
+        match
+            store.MapStatuses (false, [ StoreId 899; StoreId 898; StoreId 12345 ])
+            |> Async.RunSynchronously
+        with
+        | Error e -> failwithf "expected Ok, got %A" e
+        | Ok statuses ->
+            statuses.Length |> should equal 2
+            statuses |> List.find (fun s -> s.StoreId = StoreId 899)
+                     |> fun s -> s.CurrentStatus |> should equal Off
+            statuses |> List.iter (fun s ->
+                s.LastFlippedAt |> should equal None
+                s.FirstObservedAt |> should equal None)
+
+        match store.MapStatuses (true, [ StoreId 899 ]) |> Async.RunSynchronously with
+        | Error e -> failwithf "expected Ok, got %A" e
+        | Ok [ summary ] ->
+            summary.LastFlippedAt |> should equal (Some (at 10 5))
+            summary.FirstObservedAt |> should equal (Some (at 10 0))
+        | Ok other -> failwithf "expected one summary, got %A" other
+
 module Concurrency =
 
     [<Fact>]
