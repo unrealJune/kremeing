@@ -298,6 +298,65 @@ module Postgres =
                         return Error (UpstreamUnavailable (sprintf "postgres: %s" ex.Message))
                 }
 
+        member _.MapStatuses : Ports.GetStoreMapStatuses =
+            fun (includeHistory, ids) ->
+                if List.isEmpty ids then
+                    async { return Ok [] }
+                else
+                    let work =
+                        task {
+                            use conn = new NpgsqlConnection(connectionString)
+                            do! conn.OpenAsync()
+
+                            let rawIds =
+                                ids
+                                |> List.map (fun (StoreId id) -> id)
+                                |> List.distinct
+                                |> List.toArray
+                            let temporalColumns =
+                                if includeHistory then
+                                    "last_flipped_at, first_observed_at"
+                                else
+                                    "NULL::timestamptz, NULL::timestamptz"
+                            use cmd =
+                                new NpgsqlCommand(
+                                    sprintf
+                                        "SELECT store_id, current_status, %s \
+                                         FROM store_status \
+                                         WHERE store_id = ANY(@ids)"
+                                        temporalColumns,
+                                    conn)
+                            addParam cmd "ids" rawIds
+                            use! reader = cmd.ExecuteReaderAsync()
+                            let statuses = ResizeArray<StoreMapStatus>()
+                            let mutable hasNext = true
+                            while hasNext do
+                                let! row = reader.ReadAsync()
+                                hasNext <- row
+                                if hasNext then
+                                    let id = StoreId (reader.GetInt32 0)
+                                    let lastFlipped =
+                                        if reader.IsDBNull 2 then None
+                                        else Some (reader.GetFieldValue<DateTimeOffset>(2))
+                                    let firstObserved =
+                                        if reader.IsDBNull 3 then None
+                                        else Some (reader.GetFieldValue<DateTimeOffset>(3))
+                                    statuses.Add {
+                                        StoreId = id
+                                        CurrentStatus = wireToStatus (reader.GetString 1)
+                                        LastFlippedAt = lastFlipped
+                                        FirstObservedAt = firstObserved
+                                    }
+                            return Ok (List.ofSeq statuses)
+                        }
+                    async {
+                        try
+                            let! result = work |> Async.AwaitTask
+                            return result
+                        with ex ->
+                            return Error (UpstreamUnavailable (sprintf "postgres: %s" ex.Message))
+                    }
+
     let create (connectionString: string) = Store(connectionString)
 
     /// Postgres-backed push subscription store. Same connection string

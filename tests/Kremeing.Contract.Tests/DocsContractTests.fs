@@ -43,6 +43,7 @@ let ``OpenAPI spec documents every endpoint we ship`` () =
     for path in [
         "/health"
         "/stores/nearby"
+        "/stores/viewport"
         "/stores/search"
         "/stores/{id}/hot-light"
         "/stores/{id}/history"
@@ -64,6 +65,7 @@ let ``OpenAPI spec documents every error code we emit`` () =
         "missing_query_param"
         "invalid_bucket"
         "invalid_coordinate"
+        "invalid_bounds"
         "range_too_wide"
         "rate_limited"
         "push_disabled"

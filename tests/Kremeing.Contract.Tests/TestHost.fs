@@ -53,6 +53,9 @@ module Stubs =
     let private notUsedStatus : Ports.GetStoreStatus =
         fun id -> async { return Error (StoreNotFound id) }
 
+    let private noMapStatuses : Ports.GetStoreMapStatuses =
+        fun _ -> async { return Ok [] }
+
     let private epoch = DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)
 
     /// All-stubbed Deps. Each access returns a *fresh* record (with
@@ -67,8 +70,10 @@ module Stubs =
             GetHotLightStatus = alwaysFails (UpstreamUnavailable "stub: not configured")
             SearchNearby = notUsedNearby
             SearchByQuery = notUsedSearchByQuery
+            ListStores = fun () -> []
             History = notUsedHistory
             Status = notUsedStatus
+            MapStatuses = noMapStatuses
             Now = fun () -> epoch
             HotLightCache =
                 Cache.Cache<int, Kremeing.Contracts.Domain.HotLightObservation>(

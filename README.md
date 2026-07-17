@@ -52,6 +52,7 @@ plus an OpenAPI 3.1 reference at `/docs`.
 | `GET /docs` | Rendered OpenAPI 3.1 reference (Redoc) |
 | `GET /openapi.yaml` | Raw spec |
 | `GET /stores/nearby?lat=&lng=&limit=` | Up to 12 stores nearest a coordinate, enriched with cached temporal context |
+| `GET /stores/viewport?north=&south=&east=&west=` | Every store in map bounds with bulk-read current status; optional temporal context |
 | `GET /stores/{id}/hot-light` | Live status for one store |
 | `GET /stores/{id}/history?since=&until=` | Flip events in a time range |
 | `GET /stores/{id}/uptime?bucket=hour\|day&since=&until=` | Bucketed time-series for charting |

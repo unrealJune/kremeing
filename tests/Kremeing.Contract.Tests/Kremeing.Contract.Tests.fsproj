@@ -9,6 +9,7 @@
     <Compile Include="TestHost.fs" />
     <Compile Include="HotLightContractTests.fs" />
     <Compile Include="NearbyContractTests.fs" />
+    <Compile Include="ViewportContractTests.fs" />
     <Compile Include="UptimeContractTests.fs" />
     <Compile Include="HistoryContractTests.fs" />
     <Compile Include="DocsContractTests.fs" />

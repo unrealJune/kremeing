@@ -5,16 +5,20 @@
 // Clicking a marker invokes `onSelect(store.id)`. The map view animates to
 // the selected store. The user's location is rendered as a separate marker.
 
+const MAP_DETAIL_ZOOM = 10;
+
 function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewChange }) {
   const containerRef = React.useRef(null);
   const mapRef = React.useRef(null);
   const markersRef = React.useRef(new Map()); // id -> { marker, hot, selected }
   const userMarkerRef = React.useRef(null);
   const onViewChangeRef = React.useRef(onViewChange);
+  const onSelectRef = React.useRef(onSelect);
 
   // Keep the latest callback in a ref so the moveend listener registered
   // once at init can call the up-to-date function without re-attaching.
   React.useEffect(() => { onViewChangeRef.current = onViewChange; }, [onViewChange]);
+  React.useEffect(() => { onSelectRef.current = onSelect; }, [onSelect]);
 
   // ── init Leaflet map once ─────────────────────────────────────────────
   React.useEffect(() => {
@@ -42,14 +46,30 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Notify the App when the user finishes panning/zooming. The App
-    // decides whether the move was significant enough to refetch stores.
-    map.on('moveend', () => {
-      const c = map.getCenter();
-      onViewChangeRef.current?.({ lat: c.lat, lng: c.lng });
-    });
-
     mapRef.current = map;
+
+    const normalizeLongitude = (lng) => {
+      const wrapped = ((lng + 180) % 360 + 360) % 360 - 180;
+      return wrapped === -180 && lng > 0 ? 180 : wrapped;
+    };
+    const emitView = () => {
+      const b = map.getBounds();
+      const rawWest = b.getWest();
+      const rawEast = b.getEast();
+      const spansWorld = rawEast - rawWest >= 360;
+      onViewChangeRef.current?.({
+        bounds: {
+          north: Math.min(90, b.getNorth()),
+          south: Math.max(-90, b.getSouth()),
+          east: spansWorld ? 180 : normalizeLongitude(rawEast),
+          west: spansWorld ? -180 : normalizeLongitude(rawWest),
+        },
+        zoom: map.getZoom(),
+      });
+    };
+
+    map.on('moveend', emitView);
+    map.whenReady(emitView);
 
     return () => {
       map.remove();
@@ -91,7 +111,18 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
           keyboard: true,
           alt: store.name,
         });
-        marker.on('click', () => onSelect(store.id));
+        marker.on('click', () => {
+          if (map.getZoom() < MAP_DETAIL_ZOOM) {
+            map.once('moveend', () => onSelectRef.current(store.id));
+            map.setView(
+              [store.latitude, store.longitude],
+              MAP_DETAIL_ZOOM,
+              { animate: true, duration: 0.6 }
+            );
+          } else {
+            onSelectRef.current(store.id);
+          }
+        });
         marker.addTo(map);
         markersRef.current.set(store.id, {
           marker,
@@ -100,7 +131,7 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
         });
       }
     }
-  }, [stores, scheme, selected, onSelect]);
+  }, [stores, scheme, selected]);
 
   // ── pan to selected store ─────────────────────────────────────────────
   React.useEffect(() => {
@@ -164,3 +195,4 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
 }
 
 window.MapView = MapView;
+window.MAP_DETAIL_ZOOM = MAP_DETAIL_ZOOM;

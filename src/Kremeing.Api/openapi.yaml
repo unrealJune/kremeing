@@ -102,6 +102,52 @@ paths:
         '502':
           $ref: '#/components/responses/UpstreamUnavailable'
 
+  /stores/viewport:
+    get:
+      tags: [discovery]
+      summary: List every store visible in a map viewport
+      description: |
+        Reads the complete local discovery registry and returns every store
+        inside the supplied bounds, including its last-known hot-light status.
+        Unlike `/stores/nearby`, this endpoint is not capped by the upstream
+        search API.
+
+        Keep `includeHistory=false` for wide map views. That performs one bulk
+        status read without loading temporal columns. Set it to `true` after
+        zooming in to add `lastFlippedAt` and `firstObservedAt`.
+      parameters:
+        - in: query
+          name: north
+          required: true
+          schema: { type: number, format: double, minimum: -90, maximum: 90 }
+        - in: query
+          name: south
+          required: true
+          schema: { type: number, format: double, minimum: -90, maximum: 90 }
+        - in: query
+          name: east
+          required: true
+          schema: { type: number, format: double, minimum: -180, maximum: 180 }
+        - in: query
+          name: west
+          required: true
+          schema: { type: number, format: double, minimum: -180, maximum: 180 }
+        - in: query
+          name: includeHistory
+          schema: { type: boolean, default: false }
+          description: Include temporal status context for detail views.
+      responses:
+        '200':
+          description: Every registry store within the viewport.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ViewportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '502':
+          $ref: '#/components/responses/UpstreamUnavailable'
+
   /stores/search:
     get:
       tags: [discovery]
@@ -410,7 +456,8 @@ components:
     BadRequest:
       description: |
         Malformed request — query param missing/wrong type, invalid path
-        id, out-of-range coordinates, or `until - since > 90 days`.
+        id, out-of-range coordinates, invalid viewport ordering
+        (`invalid_bounds`), or `until - since > 90 days`.
       content:
         application/json:
           schema:
@@ -492,19 +539,42 @@ components:
             - type: string
               format: date-time
             - type: 'null'
-          description: Null until a flip is observed; `firstObservedAt` is set first.
+          description: |
+            Null until a flip is observed, or when viewport history was not
+            requested; `firstObservedAt` is set first.
         firstObservedAt:
           oneOf:
             - type: string
               format: date-time
             - type: 'null'
-          description: Null when the store has never been observed by us.
+          description: |
+            Null when the store has never been observed by us, or when viewport
+            history was not requested.
 
     NearbyResponse:
       type: object
       required: [query, stores]
       properties:
         query:  { $ref: '#/components/schemas/NearbyQuery' }
+        stores:
+          type: array
+          items: { $ref: '#/components/schemas/NearbyStore' }
+
+    ViewportQuery:
+      type: object
+      required: [north, south, east, west, includeHistory]
+      properties:
+        north:          { type: number, format: double }
+        south:          { type: number, format: double }
+        east:           { type: number, format: double }
+        west:           { type: number, format: double }
+        includeHistory: { type: boolean }
+
+    ViewportResponse:
+      type: object
+      required: [query, stores]
+      properties:
+        query: { $ref: '#/components/schemas/ViewportQuery' }
         stores:
           type: array
           items: { $ref: '#/components/schemas/NearbyStore' }

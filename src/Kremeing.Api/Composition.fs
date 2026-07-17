@@ -17,18 +17,21 @@ module Composition =
         Record: Ports.RecordObservation
         History: Ports.GetHistory
         Status: Ports.GetStoreStatus
+        MapStatuses: Ports.GetStoreMapStatuses
     }
 
     let inMemoryAdapter (s: InMemoryObservations.Store) : ObservationsAdapter = {
         Record = s.Record
         History = s.History
         Status = s.Status
+        MapStatuses = s.MapStatuses
     }
 
     let postgresAdapter (s: Postgres.Store) : ObservationsAdapter = {
         Record = s.Record
         History = s.History
         Status = s.Status
+        MapStatuses = s.MapStatuses
     }
 
     /// Push subscriptions storage + dispatcher seam. None when the
@@ -129,8 +132,10 @@ module Composition =
             GetHotLightStatus = getHotLight
             SearchNearby = searchNearby
             SearchByQuery = searchByQuery
+            ListStores = registry.Get
             History = observations.History
             Status = observations.Status
+            MapStatuses = observations.MapStatuses
             Now = now
             HotLightCache = hotLightCache
             NearbyCache = nearbyCache

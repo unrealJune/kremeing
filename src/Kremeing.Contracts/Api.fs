@@ -59,6 +59,21 @@ module Api =
     }
 
     [<CLIMutable>]
+    type ViewportQueryDto = {
+        north: float
+        south: float
+        east: float
+        west: float
+        includeHistory: bool
+    }
+
+    [<CLIMutable>]
+    type ViewportResponseDto = {
+        query: ViewportQueryDto
+        stores: NearbyStoreDto[]
+    }
+
+    [<CLIMutable>]
     type SearchQueryDto = {
         q: string
         limit: int

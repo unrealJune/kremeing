@@ -268,11 +268,8 @@
       // view, not the recipient's) so we start in 'idle' there too.
       const [locateState, setLocateState] = React.useState('idle');
 
-      // Tracks the center the most recent /stores/nearby fetch was
-      // anchored on, so map-pan refetches can compare and only fire
-      // for genuinely-new viewports.
-      const lastFetchCenterRef = React.useRef({ lat: center.lat, lng: center.lng });
       const moveDebounceRef = React.useRef(null);
+      const viewportRequestRef = React.useRef(null);
 
       // Locate handler used by both the gesture-less auto-attempt on
       // mount and the explicit "locate me" button. iOS Safari will not
@@ -294,7 +291,6 @@
           (pos) => {
             const c = { lat: pos.coords.latitude, lng: pos.coords.longitude };
             setUserPos(c);
-            lastFetchCenterRef.current = c;
             setCenter(c);
             setLocateState('located');
             setLocating(false);
@@ -341,60 +337,64 @@
         return () => { cancelled = true; };
       }, [locateMe]);
 
-      // ── /stores/nearby fetcher. Pulled out so both the initial-load
-      //    effect and the user-pan handler can call it without going
-      //    through setCenter (which would round-trip into map.panTo
-      //    and cause the animation loop).
-      const fetchNearbyAt = React.useCallback((lat, lng) => {
-        let cancelled = false;
+      // ── Exact viewport fetch. Wide views request current state only;
+      //    detail views also request the temporal fields used by the list.
+      //    Abort the previous request so a slow response from an earlier
+      //    pan can never replace the current viewport's stores.
+      const fetchViewport = React.useCallback((view) => {
+        viewportRequestRef.current?.abort();
+        const controller = new AbortController();
+        viewportRequestRef.current = controller;
         setError(null);
-        window.KREMEING_API.fetchNearbyStores(lat, lng)
+        const includeHistory = view.zoom >= window.MAP_DETAIL_ZOOM;
+        window.KREMEING_API.fetchViewportStores(
+          view.bounds,
+          includeHistory,
+          controller.signal
+        )
           .then((s) => {
-            if (cancelled) return;
+            if (controller.signal.aborted) return;
             setStores(s);
             setError(null);
-            lastFetchCenterRef.current = { lat, lng };
           })
           .catch((err) => {
-            if (cancelled) return;
-            console.warn('[kremeing] /stores/nearby failed:', err.message);
+            if (controller.signal.aborted || err.name === 'AbortError') return;
+            console.warn('[kremeing] /stores/viewport failed:', err.message);
             if (window.KREMEING_USE_MOCKS) {
-              setStores(window.MOCK_STORES);
+              const { north, south, east, west } = view.bounds;
+              const inLongitudeRange = (lng) =>
+                west <= east
+                  ? lng >= west && lng <= east
+                  : lng >= west || lng <= east;
+              setStores(window.MOCK_STORES.filter((store) =>
+                store.latitude >= south
+                && store.latitude <= north
+                && inLongitudeRange(store.longitude)));
             } else {
-              setStores([]);
-              setError(err.message || 'Could not load nearby stores');
+              setError(err.message || 'Could not load visible stores');
             }
           });
-        return () => { cancelled = true; };
       }, []);
 
-      // ── Initial load + programmatic recenters (geolocate, search,
-      //    share-link arrival). User pans don't change `center` so
-      //    they don't trigger this effect, which is what breaks the
-      //    pan→setCenter→panTo flicker loop.
       React.useEffect(() => {
-        return fetchNearbyAt(center.lat, center.lng);
-      }, [center.lat, center.lng, fetchNearbyAt]);
+        return () => {
+          if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
+          viewportRequestRef.current?.abort();
+        };
+      }, []);
 
-      // ── Map pan/zoom: refetch /stores/nearby for the new viewport
-      //    *without* updating `center` — that would round-trip back
-      //    through map.panTo and cause flicker. Distance threshold is
-      //    crude L1 in degrees: ≈5 km on lat, ≈4 km on lng — loose
-      //    enough that finger-jitter doesn't fire, tight enough that
-      //    panning across a metro area refreshes results.
-      const onViewChange = React.useCallback((c) => {
-        const last = lastFetchCenterRef.current;
-        const moved = Math.abs(c.lat - last.lat) > 0.05
-                   || Math.abs(c.lng - last.lng) > 0.05;
-        if (!moved) return;
+      // ── Map pan/zoom: debounce the exact bounds emitted by Leaflet.
+      const onViewChange = React.useCallback((view) => {
         if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
         moveDebounceRef.current = setTimeout(() => {
-          fetchNearbyAt(c.lat, c.lng);
-        }, 350);
-      }, [fetchNearbyAt]);
+          fetchViewport(view);
+        }, 250);
+      }, [fetchViewport]);
 
       // ── Search by ZIP or "City, ST" via /stores/search.
       const onSearch = React.useCallback(async (q) => {
+        if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
+        viewportRequestRef.current?.abort();
         setSearching(true);
         setError(null);
         try {
@@ -402,10 +402,6 @@
           setStores(results);
           if (results.length > 0) {
             const first = results[0];
-            // Pre-stamp lastFetchCenterRef so the upcoming map pan
-            // (triggered by setCenter below) doesn't fire its own
-            // refetch — we already have the results.
-            lastFetchCenterRef.current = { lat: first.latitude, lng: first.longitude };
             setCenter({ lat: first.latitude, lng: first.longitude });
             setSelected(first.id);
           } else {
