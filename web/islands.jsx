@@ -15,15 +15,15 @@ function LocateButton({ scheme, state, onLocate }) {
   return (
     <button
       onClick={onLocate}
-      disabled={locating || denied}
+      disabled={locating}
       aria-label={
-        denied   ? 'Location blocked — enable in browser settings' :
+        denied   ? 'Location blocked — change browser settings, then retry' :
         locating ? 'Locating…' :
         located  ? 'Recenter on my location' :
                    'Use my location'
       }
       title={
-        denied   ? 'Location blocked. Enable in your browser settings, then reload.' :
+        denied   ? 'Location blocked. Change your browser settings, then tap to retry.' :
         locating ? 'Locating…' :
         located  ? 'Recenter on my location' :
                    'Use my location'
@@ -39,7 +39,7 @@ function LocateButton({ scheme, state, onLocate }) {
         color: denied ? scheme.outline
               : located ? scheme.primary
               : scheme.onSurface,
-        cursor: (locating || denied) ? 'default' : 'pointer',
+        cursor: locating ? 'default' : 'pointer',
         boxShadow: '0 1px 3px rgba(0,0,0,0.10), 0 4px 14px rgba(0,0,0,0.12)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         transition: 'transform 160ms, color 200ms',
