@@ -28,6 +28,10 @@ object ApiCodec {
     fun decodeUptime(body: String): UptimeResponse =
         json.decodeFromString(UptimeResponse.serializer(), body)
 
+    /** Decode a `GET /map-config` response body. */
+    fun decodeMapConfig(body: String): MapConfig =
+        json.decodeFromString(MapConfig.serializer(), body)
+
     /** Encode a `POST /device-subscriptions` request body. */
     fun encodeSubscribe(request: DeviceSubscribeRequest): String =
         json.encodeToString(DeviceSubscribeRequest.serializer(), request)

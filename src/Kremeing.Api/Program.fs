@@ -201,6 +201,27 @@ let private buildDevicePushFeature
              /device-subscriptions endpoints will return 503")
         None
 
+/// Basemap tile config for /map-config. `KREMEING_BASEMAP_URL` overrides
+/// the template (without key); `KREMEING_BASEMAP_KEY_WEB` /
+/// `KREMEING_BASEMAP_KEY_ANDROID` are the per-client tile-server keys.
+/// A missing key is a warning, not a startup failure: that client's URL
+/// is served without `?key=` and its tiles 403, which is easy to spot.
+let private buildMapConfig (logger: ILogger) : HttpHandlers.MapConfig =
+    let optEnv name =
+        match Environment.GetEnvironmentVariable name with
+        | NotNullOrWhitespace s -> Some (s.Trim())
+        | _ -> None
+    let url = optEnv "KREMEING_BASEMAP_URL" |> Option.defaultValue HttpHandlers.DefaultBasemapUrl
+    let web = optEnv "KREMEING_BASEMAP_KEY_WEB"
+    let android = optEnv "KREMEING_BASEMAP_KEY_ANDROID"
+    for name, key in [ "KREMEING_BASEMAP_KEY_WEB", web; "KREMEING_BASEMAP_KEY_ANDROID", android ] do
+        if key.IsNone then
+            logger.LogWarning(
+                "Basemap key disabled ({name} missing); /map-config will serve \
+                 the tile URL without ?key= and tiles will 403", name)
+    logger.LogInformation("Basemap tile URL template: {url}", url)
+    { UrlTemplate = url; WebKey = web; AndroidKey = android }
+
 /// Resolves the periodic discovery-refresh interval. Defaults to 12h
 /// (twice daily); `KREMEING_DISCOVERY_REFRESH_INTERVAL` overrides it with a
 /// positive number of hours (e.g. "6" or "0.5"). Invalid values fall back
@@ -252,7 +273,8 @@ let main args =
     // swaps it. Both the poller and the read handlers read through the
     // holder so a refresh is visible everywhere at once.
     let registryHolder = Registry.Holder(registry, DateTimeOffset.UtcNow)
-    let deps = Composition.build send registryHolder observations push devicePush
+    let mapConfig = buildMapConfig logger
+    let deps = Composition.build send registryHolder observations push devicePush mapConfig
 
     // Poller + discovery refresh are gated by role — only one deployment
     // runs them, so multiple API replicas don't multiply our upstream load.

@@ -74,3 +74,11 @@ data class DeviceSubscribeResponse(
 data class DeviceUnsubscribeRequest(
     val token: String,
 )
+
+/** Response body for `GET /map-config?client=android`. */
+@Serializable
+data class MapConfig(
+    val tileUrlTemplate: String,
+    val attribution: String = "",
+    val maxZoom: Int = 20,
+)

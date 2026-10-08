@@ -115,6 +115,25 @@ class KremeingApiClientTest {
     }
 
     @Test
+    fun `mapConfig requests the android client config and parses it`() {
+        responder = { _ ->
+            200 to """
+                {"tileUrlTemplate":"https://tiles.test/light_all/{z}/{x}/{y}{r}.png?key=K",
+                 "attribution":"© OpenStreetMap contributors © CARTO","maxZoom":20}
+            """.trimIndent()
+        }
+
+        val config = KremeingApiClient(baseUrl).mapConfig()
+
+        val req = requests.single()
+        assertEquals("GET", req.method)
+        assertEquals("/map-config", req.path)
+        assertEquals("client=android", req.query)
+        assertEquals("https://tiles.test/light_all/{z}/{x}/{y}{r}.png?key=K", config.tileUrlTemplate)
+        assertEquals(20, config.maxZoom)
+    }
+
+    @Test
     fun `non-2xx responses raise KremeingApiException carrying the status`() {
         responder = { _ -> 503 to """{"error":{"code":"push_disabled"}}""" }
 

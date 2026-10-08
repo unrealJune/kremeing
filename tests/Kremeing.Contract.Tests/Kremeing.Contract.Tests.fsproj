@@ -18,6 +18,7 @@
     <Compile Include="SearchContractTests.fs" />
     <Compile Include="PushSubscriptionsContractTests.fs" />
     <Compile Include="DeviceSubscriptionsContractTests.fs" />
+    <Compile Include="MapConfigContractTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

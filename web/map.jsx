@@ -1,5 +1,5 @@
-// Real, pannable map. Leaflet + CartoDB Positron tiles — clean light basemap,
-// no API key, free for general use (attribution rendered by Leaflet).
+// Real, pannable map. Leaflet + self-hosted Positron raster tiles from
+// basemaps.junephilip.com (URL + key served by /map-config; see basemap-utils.js).
 //
 // Stores are added as L.markers using the `pinIcon` factory from pins.jsx.
 // Clicking a marker invokes `onSelect(store.id)`. The map view animates to
@@ -34,15 +34,15 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
       worldCopyJump: true,
     });
 
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }
-    ).addTo(map);
+    // Tile URL + key come from /map-config; add the layer when it resolves
+    // so the map shell and store pins never wait on it. loadTileConfig
+    // never rejects — failures resolve to the keyless fallback URL.
+    let disposed = false;
+    window.KREMEING_BASEMAP.loadTileConfig(window.KREMEING_API.API_BASE)
+      .then(({ url, attribution, maxZoom }) => {
+        if (disposed) return;
+        L.tileLayer(url, { attribution, maxZoom }).addTo(map);
+      });
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
@@ -72,6 +72,7 @@ function MapView({ stores, scheme, selected, onSelect, center, userPos, onViewCh
     map.whenReady(emitView);
 
     return () => {
+      disposed = true;
       map.remove();
       mapRef.current = null;
       markersRef.current.clear();

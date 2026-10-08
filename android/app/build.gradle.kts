@@ -31,6 +31,21 @@ android {
             "\"${project.findProperty("kremeingBaseUrl") ?: "https://kremeing.example.com"}\"",
         )
 
+        // Compiled-in basemap fallback, used only until the first successful
+        // GET /map-config (which supplies the live URL + key). Pass the
+        // kremeing-android tile key with -PkremeingBasemapKey=… in CI/release;
+        // never commit a real key here.
+        buildConfigField(
+            "String",
+            "KREMEING_BASEMAP_URL",
+            "\"${project.findProperty("kremeingBasemapUrl") ?: "https://basemaps.junephilip.com/light_all/{z}/{x}/{y}{r}.png"}\"",
+        )
+        buildConfigField(
+            "String",
+            "KREMEING_BASEMAP_KEY",
+            "\"${project.findProperty("kremeingBasemapKey") ?: ""}\"",
+        )
+
         // Whether the app wires up FCM push + notifications. Turn this off
         // (-PkremeingPushEnabled=false) to build a "notificationless" APK that
         // skips the token/subscribe flow entirely — useful for CI-built debug

@@ -177,7 +177,11 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug -PbuildAndroidApp=true -PkremeingPushEnabled=false --no-daemon --console=plain
+        # The basemap key is only the compiled-in fallback (the app fetches the
+        # live one from /map-config); an unset secret builds with an empty key.
+        env:
+          KREMEING_BASEMAP_KEY: ${{ secrets.KREMEING_BASEMAP_KEY_ANDROID }}
+        run: ./gradlew :app:assembleDebug -PbuildAndroidApp=true -PkremeingPushEnabled=false "-PkremeingBasemapKey=$KREMEING_BASEMAP_KEY" --no-daemon --console=plain
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -341,6 +341,7 @@ Object.assign(window, {
     getVapidPublicKey, subscribeStore, unsubscribeStore,
     listSubscribedStores, pushSupported,
     PUSH_DISABLED, PUSH_UNSUPPORTED,
+    API_BASE,
   },
   KREMEING_USE_MOCKS: USE_MOCKS,
   MOCK_STORES,

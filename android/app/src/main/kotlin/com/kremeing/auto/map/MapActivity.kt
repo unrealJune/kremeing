@@ -32,16 +32,18 @@ import com.kremeing.auto.R
 import com.kremeing.auto.api.KremeingApiClient
 import com.kremeing.auto.car.FusedLocationSource
 import com.kremeing.auto.car.LocationSource
+import com.kremeing.auto.logic.BasemapTemplate
 import com.kremeing.auto.logic.CardFormatter
 import com.kremeing.auto.logic.HotLightStatus
 import com.kremeing.auto.logic.NavigationIntent
 import com.kremeing.auto.logic.NearbyStore
 import com.kremeing.auto.logic.Uptime
+import com.kremeing.auto.prefs.BasemapPrefs
 import com.kremeing.auto.prefs.SubscriptionPrefs
 import com.kremeing.auto.ui.DayGridView
 import com.kremeing.auto.ui.HeatBarView
 import org.osmdroid.config.Configuration
-import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.tileprovider.modules.SqlTileWriter
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
@@ -54,16 +56,18 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
 /**
- * The phone home screen: a native OpenStreetMap map (osmdroid, CARTO "light"
- * tiles) of nearby stores with status-coloured pins — the native counterpart of
+ * The phone home screen: a native OpenStreetMap map (osmdroid, self-hosted
+ * Positron tiles; see [KremeingBasemapTileSource]) of nearby stores with status-coloured pins — the native counterpart of
  * the web app. Tapping a pin opens a bottom sheet with the store's detail and
  * the interactive heat bar ([HeatBarView]); the top bar searches by ZIP/city.
  *
- * [apiClient], [locationSource] and [executor] are injectable for tests.
+ * [apiClient], [locationSource], [executor] and [basemapExecutor] are
+ * injectable for tests.
  */
 class MapActivity : AppCompatActivity() {
 
     private val prefs by lazy { SubscriptionPrefs(this) }
+    private val basemapPrefs by lazy { BasemapPrefs(this) }
 
     private lateinit var mapView: MapView
     private lateinit var sheetBehavior: BottomSheetBehavior<NestedScrollView>
@@ -77,6 +81,8 @@ class MapActivity : AppCompatActivity() {
     private lateinit var searchProgress: ProgressBar
 
     internal var executor: Executor = Executors.newSingleThreadExecutor()
+    /** Separate from [executor] so a slow /map-config never delays store loads. */
+    internal var basemapExecutor: Executor = Executors.newSingleThreadExecutor()
     internal var apiClient: KremeingApiClient = KremeingApiClient(BuildConfig.KREMEING_BASE_URL)
     internal var locationSource: LocationSource? = null
 
@@ -103,7 +109,7 @@ class MapActivity : AppCompatActivity() {
         setContentView(R.layout.activity_map)
 
         mapView = findViewById<MapView>(R.id.map).apply {
-            setTileSource(CARTO_LIGHT)
+            setTileSource(KremeingBasemapTileSource(initialBasemapTemplate()))
             setMultiTouchControls(true)   // smooth pinch-to-zoom
             setTilesScaledToDpi(true)
             isHorizontalMapRepetitionEnabled = false
@@ -154,6 +160,47 @@ class MapActivity : AppCompatActivity() {
         mapView.controller.setCenter(GeoPoint(lat, lng))
 
         requestLocationThenLoad()
+        refreshBasemap()
+    }
+
+    /** Last template from the API if we have one, else the compiled-in default. */
+    private fun initialBasemapTemplate(): String =
+        basemapPrefs.tileUrlTemplate
+            ?: BasemapTemplate.withKey(BuildConfig.KREMEING_BASEMAP_URL, BuildConfig.KREMEING_BASEMAP_KEY)
+
+    /**
+     * Fetches the current tile template from `/map-config`, caches it, and swaps
+     * the tile source if it changed. Failure keeps whatever is showing. Also
+     * purges the retired CARTO tile cache once, so no "API KEY REQUIRED" tiles
+     * linger on upgraded installs.
+     */
+    private fun refreshBasemap() {
+        basemapExecutor.execute {
+            if (!basemapPrefs.legacyCachePurged) {
+                try {
+                    SqlTileWriter().apply {
+                        purgeCache(KremeingBasemapTileSource.LEGACY_NAME)
+                        onDetach()
+                    }
+                    basemapPrefs.legacyCachePurged = true
+                } catch (e: Exception) {
+                    Log.w(TAG, "legacy tile cache purge failed", e)
+                }
+            }
+            val template = try {
+                apiClient.mapConfig().tileUrlTemplate
+            } catch (e: Exception) {
+                Log.w(TAG, "map-config load failed; keeping current basemap", e)
+                return@execute
+            }
+            basemapPrefs.tileUrlTemplate = template
+            runOnUiThread {
+                val current = mapView.tileProvider.tileSource as? KremeingBasemapTileSource
+                if (current?.template != template) {
+                    mapView.setTileSource(KremeingBasemapTileSource(template))
+                }
+            }
+        }
     }
 
     override fun onResume() {
@@ -379,21 +426,5 @@ class MapActivity : AppCompatActivity() {
         const val DEFAULT_ZOOM = 11.0
         const val NEARBY_LIMIT = 50
         const val HISTORY_DAYS = 89L
-
-        /** CARTO "light" basemap — the clean, low-clutter style the web app uses. */
-        val CARTO_LIGHT = XYTileSource(
-            "CartoLight",
-            0,
-            20,
-            256,
-            ".png",
-            arrayOf(
-                "https://a.basemaps.cartocdn.com/light_all/",
-                "https://b.basemaps.cartocdn.com/light_all/",
-                "https://c.basemaps.cartocdn.com/light_all/",
-                "https://d.basemaps.cartocdn.com/light_all/",
-            ),
-            "© OpenStreetMap contributors © CARTO",
-        )
     }
 }

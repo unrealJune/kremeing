@@ -5,6 +5,7 @@ import com.kremeing.auto.logic.DeviceSubscribeRequest
 import com.kremeing.auto.logic.DeviceSubscribeResponse
 import com.kremeing.auto.logic.DeviceUnsubscribeRequest
 import com.kremeing.auto.logic.HotLightHistory
+import com.kremeing.auto.logic.MapConfig
 import com.kremeing.auto.logic.NearbyStore
 import com.kremeing.auto.logic.UptimeResponse
 import java.io.BufferedReader
@@ -93,6 +94,10 @@ open class KremeingApiClient(private val baseUrl: String) {
     /** Aggregated uptime buckets for one store ([bucket] is "hour" or "day"). */
     open fun uptime(storeId: Int, bucket: String): UptimeResponse =
         ApiCodec.decodeUptime(get("/stores/$storeId/uptime?bucket=${encStr(bucket)}"))
+
+    /** Basemap tile URL template (with this client's key) for the map screen. */
+    open fun mapConfig(client: String = "android"): MapConfig =
+        ApiCodec.decodeMapConfig(get("/map-config?client=${encStr(client)}"))
 
     private fun get(path: String): String = request("GET", path, null)
 
