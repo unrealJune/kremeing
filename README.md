@@ -171,6 +171,9 @@ kremeing/
 | `KREMEING_VAPID_SUBJECT` | no | `mailto:` placeholder | Web Push VAPID subject (`mailto:` or origin URL). |
 | `KREMEING_FCM_PROJECT_ID` | no | — | Firebase project id. Enables native (Android) device push for the Android Auto app; `/device-subscriptions` returns `503 push_disabled` until set. |
 | `KREMEING_FCM_ACCESS_TOKEN` | no | — | OAuth2 bearer for FCM HTTP v1. **Secret.** Mint from a Firebase service account (short-lived; refresh via a sidecar/cron). Without it, subscriptions are still stored but sends are skipped. |
+| `KREMEING_BASEMAP_URL` | no | `https://basemaps.junephilip.com/light_all/{z}/{x}/{y}{r}.png` | Basemap tile URL template served on `/map-config`, without the key. |
+| `KREMEING_BASEMAP_KEY_WEB` | recommended | — | Tile-server key for the web client (`kremeing-web`). Unset → `/map-config` returns the URL without `?key=` and tiles 403. |
+| `KREMEING_BASEMAP_KEY_ANDROID` | recommended | — | Tile-server key for the Android app (`kremeing-android`). Same fallback as above. |
 | `KREMEING_TEST_DATABASE_URL` | no | localhost peer | Used only by `Kremeing.Postgres.Tests`. |
 | `ASPNETCORE_URLS` | no | `http://localhost:5000` | Standard ASP.NET Core. |
 

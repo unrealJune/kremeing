@@ -250,6 +250,52 @@ paths:
         '404':
           $ref: '#/components/responses/StoreNotFound'
 
+  /map-config:
+    get:
+      tags: [meta]
+      summary: Basemap tile URL for the map clients
+      description: |
+        Returns the raster tile URL template each client should hand to
+        its map library (Leaflet / osmdroid), including that client's
+        tile-server key as `?key=`. Served from the backend so the URL and
+        keys can change without a client release. If the operator hasn't
+        configured a key for the client, the template comes back without
+        `?key=` (tiles will then 403). Cached for an hour.
+      parameters:
+        - in: query
+          name: client
+          required: false
+          description: Which client is asking. Missing or unknown values get the web key.
+          schema:
+            type: string
+            enum: [web, android]
+      responses:
+        '200':
+          description: Tile config.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: '`public, max-age=3600`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tileUrlTemplate, attribution, maxZoom]
+                properties:
+                  tileUrlTemplate:
+                    type: string
+                    description: |
+                      Leaflet-style template. `{r}` is empty for 256 px tiles
+                      or `@2x` for 512 px retina tiles.
+                    example: https://basemaps.junephilip.com/light_all/{z}/{x}/{y}{r}.png?key=abc123
+                  attribution:
+                    type: string
+                    example: © OpenStreetMap contributors © CARTO
+                  maxZoom:
+                    type: integer
+                    example: 20
+
   /vapid-public-key:
     get:
       tags: [push]

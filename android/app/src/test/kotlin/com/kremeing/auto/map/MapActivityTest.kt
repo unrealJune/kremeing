@@ -11,6 +11,7 @@ import com.kremeing.auto.car.LocationSource
 import com.kremeing.auto.testing.FakeKremeingApiClient
 import com.kremeing.auto.testing.store
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +19,8 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.osmdroid.util.MapTileIndex
+import org.osmdroid.views.MapView
 import java.util.concurrent.Executor
 
 /**
@@ -45,6 +48,7 @@ class MapActivityTest {
         val controller = Robolectric.buildActivity(MapActivity::class.java)
         controller.get().apply {
             executor = Executor { it.run() }
+            basemapExecutor = Executor { it.run() }
             apiClient = FakeKremeingApiClient(stores = listOf(store(id = 1, status = "on")))
             locationSource = LocationSource { 47.6 to -122.3 }
         }
@@ -54,5 +58,47 @@ class MapActivityTest {
 
         val sheet = controller.get().findViewById<NestedScrollView>(R.id.sheet)
         assertEquals(BottomSheetBehavior.STATE_HIDDEN, BottomSheetBehavior.from(sheet).state)
+    }
+
+    @Test
+    fun `map uses the self-hosted basemap source with the API-supplied key`() {
+        val controller = Robolectric.buildActivity(MapActivity::class.java)
+        controller.get().apply {
+            executor = Executor { it.run() }
+            basemapExecutor = Executor { it.run() }
+            apiClient = FakeKremeingApiClient()
+            locationSource = LocationSource { 47.6 to -122.3 }
+        }
+
+        controller.setup()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val map = controller.get().findViewById<MapView>(R.id.map)
+        val source = map.tileProvider.tileSource
+        assertTrue(source is KremeingBasemapTileSource)
+        assertEquals("KremeingBasemapLight", source.name())
+        assertEquals(
+            "https://basemaps.test/light_all/14/2624/5721.png?key=TEST",
+            (source as KremeingBasemapTileSource).getTileURLString(MapTileIndex.getTileIndex(14, 2624, 5721)),
+        )
+    }
+
+    @Test
+    fun `map keeps a basemap when map-config is unavailable`() {
+        val controller = Robolectric.buildActivity(MapActivity::class.java)
+        controller.get().apply {
+            executor = Executor { it.run() }
+            basemapExecutor = Executor { it.run() }
+            apiClient = FakeKremeingApiClient(mapConfig = null)
+            locationSource = LocationSource { 47.6 to -122.3 }
+        }
+
+        controller.setup()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        val source = controller.get().findViewById<MapView>(R.id.map).tileProvider.tileSource
+        assertTrue(source is KremeingBasemapTileSource)
+        val url = (source as KremeingBasemapTileSource).getTileURLString(MapTileIndex.getTileIndex(14, 2624, 5721))
+        assertTrue(url, url.startsWith("https://basemaps.junephilip.com/light_all/14/2624/5721.png"))
     }
 }

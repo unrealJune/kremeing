@@ -376,3 +376,17 @@ class ApiCodecTests {
         assertEquals("""{"token":"abc"}""", ApiCodec.encodeUnsubscribe(DeviceUnsubscribeRequest("abc")))
     }
 }
+
+class BasemapTemplateTests {
+    @Test fun `expands z x y and drops the retina suffix`() {
+        assertEquals(
+            "https://tiles.test/light_all/14/2624/5721.png?key=K",
+            BasemapTemplate.expand("https://tiles.test/light_all/{z}/{x}/{y}{r}.png?key=K", 14, 2624, 5721),
+        )
+    }
+
+    @Test fun `withKey appends the key only when present`() {
+        assertEquals("https://t/{z}.png?key=K", BasemapTemplate.withKey("https://t/{z}.png", "K"))
+        assertEquals("https://t/{z}.png", BasemapTemplate.withKey("https://t/{z}.png", ""))
+    }
+}

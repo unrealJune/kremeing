@@ -18,6 +18,7 @@
     <Compile Include="DevicePushDispatchTests.fs" />
     <Compile Include="InMemoryDeviceSubscriptionsTests.fs" />
     <Compile Include="PollerNotifyTests.fs" />
+    <Compile Include="MapConfigTests.fs" />
   </ItemGroup>
 
   <ItemGroup>

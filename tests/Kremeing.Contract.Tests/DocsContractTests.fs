@@ -48,6 +48,7 @@ let ``OpenAPI spec documents every endpoint we ship`` () =
         "/stores/{id}/hot-light"
         "/stores/{id}/history"
         "/stores/{id}/uptime"
+        "/map-config"
         "/vapid-public-key"
         "/subscriptions"
         "/device-subscriptions"

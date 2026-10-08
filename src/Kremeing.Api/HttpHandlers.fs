@@ -791,6 +791,51 @@ module HttpHandlers =
                             return! next ctx
             }
 
+    // ──── /map-config ───────────────────────────────────────────────────
+
+    /// Basemap tile server config. `UrlTemplate` is the Leaflet-style
+    /// template *without* the key; the key for the requesting client is
+    /// appended as `?key=`. A missing key still yields a URL — the client
+    /// then gets visible 403 tiles instead of a broken map shell.
+    type MapConfig = {
+        UrlTemplate: string
+        WebKey: string option
+        AndroidKey: string option
+    }
+
+    [<Literal>]
+    let DefaultBasemapUrl =
+        "https://basemaps.junephilip.com/light_all/{z}/{x}/{y}{r}.png"
+
+    [<Literal>]
+    let BasemapAttribution = "© OpenStreetMap contributors © CARTO"
+
+    [<Literal>]
+    let BasemapMaxZoom = 20
+
+    /// Resolves the tile URL for `client` ("web" | "android"). Missing or
+    /// unknown clients get the web key.
+    let tileUrlFor (config: MapConfig) (client: string option) : string =
+        let key =
+            match client |> Option.map (fun c -> c.Trim().ToLowerInvariant()) with
+            | Some "android" -> config.AndroidKey
+            | _ -> config.WebKey
+        match key with
+        | Some k when not (String.IsNullOrWhiteSpace k) ->
+            let sep = if config.UrlTemplate.Contains "?" then "&" else "?"
+            config.UrlTemplate + sep + "key=" + Uri.EscapeDataString k
+        | _ -> config.UrlTemplate
+
+    let getMapConfig (config: MapConfig) : HttpHandler =
+        fun next ctx ->
+            let client = ctx.TryGetQueryStringValue "client"
+            let body : MapConfigResponseDto = {
+                tileUrlTemplate = tileUrlFor config client
+                attribution = BasemapAttribution
+                maxZoom = BasemapMaxZoom
+            }
+            (setHttpHeader "Cache-Control" "public, max-age=3600" >=> json body) next ctx
+
     // ──── webApp ────────────────────────────────────────────────────────
 
     /// All HTTP dependencies the webApp needs, bundled. Building this
@@ -821,6 +866,8 @@ module HttpHandlers =
         /// Liveness payload source: current registry size + last discovery
         /// refresh time, surfaced on /health.
         Health: unit -> HealthInfo
+        /// Basemap tile URL + per-client keys served on /map-config.
+        MapConfig: MapConfig
     }
 
     let webApp (deps: Deps) : HttpHandler =
@@ -847,6 +894,7 @@ module HttpHandlers =
                         (getHistory deps.History deps.Now)
             GET >=> routef "/stores/%s/uptime"
                         (getUptime deps.History deps.Status deps.Now)
+            GET    >=> route "/map-config"       >=> getMapConfig deps.MapConfig
             GET    >=> route "/vapid-public-key" >=> getVapidPublicKey deps.Push
             GET    >=> route "/subscriptions"    >=> getSubscriptionsByEndpoint deps.Push
             POST   >=> route "/subscriptions"    >=> postSubscription deps.Push

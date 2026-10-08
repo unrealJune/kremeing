@@ -3,6 +3,7 @@ package com.kremeing.auto.testing
 import com.kremeing.auto.api.KremeingApiClient
 import com.kremeing.auto.logic.DeviceSubscribeResponse
 import com.kremeing.auto.logic.HotLightHistory
+import com.kremeing.auto.logic.MapConfig
 import com.kremeing.auto.logic.NearbyStore
 
 /**
@@ -14,6 +15,7 @@ class FakeKremeingApiClient(
     private val stores: List<NearbyStore> = emptyList(),
     private val failNearby: Boolean = false,
     private val history: HotLightHistory = HotLightHistory(storeId = 0, flips = emptyList()),
+    private val mapConfig: MapConfig? = MapConfig(tileUrlTemplate = TEST_TILE_TEMPLATE),
 ) : KremeingApiClient("https://fake.invalid") {
 
     data class SubscribeCall(
@@ -57,6 +59,15 @@ class FakeKremeingApiClient(
         sinceIso: String?,
         untilIso: String?,
     ): HotLightHistory = history
+
+    /** Returns [mapConfig], or throws when it is null (simulates /map-config down). */
+    override fun mapConfig(client: String): MapConfig =
+        mapConfig ?: throw RuntimeException("map-config unavailable")
+
+    companion object {
+        const val TEST_TILE_TEMPLATE =
+            "https://basemaps.test/light_all/{z}/{x}/{y}{r}.png?key=TEST"
+    }
 }
 
 /** Shared store fixture mirroring the `:logic` test fixtures. */

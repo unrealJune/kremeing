@@ -84,6 +84,7 @@ module Composition =
             (observations: ObservationsAdapter)
             (push: PushFeature option)
             (devicePush: DevicePushFeature option)
+            (mapConfig: HttpHandlers.MapConfig)
             : ProductionDeps =
 
         // Lookup cityStateZip query for a given StoreId by walking the
@@ -147,6 +148,7 @@ module Composition =
                 fun () ->
                     { Stores = registry.Count
                       LastDiscoveryRefresh = registry.LastRefreshedAt }
+            MapConfig = mapConfig
         }
 
         let webNotifyFlipOn =

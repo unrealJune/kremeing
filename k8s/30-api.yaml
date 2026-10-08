@@ -52,6 +52,14 @@ spec:
                   key: url
             - name: ASPNETCORE_URLS
               value: http://0.0.0.0:8080
+            # Basemap tile-server keys served on /map-config. Without them the
+            # map clients get 403 tiles (the map shell and pins still work).
+            # - name: KREMEING_BASEMAP_KEY_WEB
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-basemap, key: web-key }
+            # - name: KREMEING_BASEMAP_KEY_ANDROID
+            #   valueFrom:
+            #     secretKeyRef: { name: kremeing-basemap, key: android-key }
             # Optional push transports. Uncomment after creating the
             # kremeing-push Secret (see 20-push-secret.example.yaml). The api
             # role serves the subscribe/unsubscribe endpoints; enabling these

@@ -94,4 +94,8 @@ module Stubs =
                 fun () ->
                     { Stores = 0
                       LastDiscoveryRefresh = epoch }
+            MapConfig =
+                { UrlTemplate = HttpHandlers.DefaultBasemapUrl
+                  WebKey = Some "WEBKEY"
+                  AndroidKey = Some "ANDROIDKEY" }
         }

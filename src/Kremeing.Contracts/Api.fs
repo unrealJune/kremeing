@@ -163,6 +163,16 @@ module Api =
         publicKey: string
     }
 
+    /// Response of `GET /map-config?client=web|android`. Tells each
+    /// client which basemap tile URL to load, so the URL and its key
+    /// can change without shipping a new app build.
+    [<CLIMutable>]
+    type MapConfigResponseDto = {
+        tileUrlTemplate: string
+        attribution: string
+        maxZoom: int
+    }
+
     /// Response of `GET /subscriptions?endpoint=...`. Lets the web
     /// client tell, on page load, which stores this browser is already
     /// subscribed to — so the bell button shows the right state.
